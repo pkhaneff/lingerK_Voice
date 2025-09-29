@@ -1,0 +1,33 @@
+# Core FastAPI dependencies
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# HTTP and JSON handling
+starlette>=0.27.0
+orjson>=3.9.10
+
+# AWS SDK for S3 operations
+boto3>=1.34.0
+botocore>=1.34.0
+
+# Logging
+loguru>=0.7.2
+
+# Python standard libraries (included by default, but listing versions for reference)
+# uuid - built-in
+# datetime - built-in  
+# io - built-in
+# typing - built-in
+
+# Optional dependencies for development/testing
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+httpx>=0.25.2  # For testing FastAPI endpoints
+
+# Optional dependencies for speech-to-text processing (uncomment if needed)
+openai-whisper>=20231117  # For local speech-to-text processing
+ffmpeg-python>=0.2.0      # For video audio extraction
+    
+# Environment and configuration
+python-dotenv>=1.0.0       # For .env file support
