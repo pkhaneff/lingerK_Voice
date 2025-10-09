@@ -3,6 +3,7 @@ import os
 
 import uvicorn
 from fastapi import FastAPI
+from loguru import logger as custom_logger
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.middleware.cors import CORSMiddleware
@@ -11,6 +12,13 @@ from starlette.responses import Response
 from starlette.types import Message
 
 from app.core.config import ALLOWED_HOSTS, API_PREFIX, DEBUG, PROJECT_NAME, VERSION, MAX_REQUEST_SIZE
+
+try:
+    import cupy as cp
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+    custom_logger.warning("Cupy not available, using CPU instead.")
 
 if PROJECT_NAME:
     from app.api.routers.api import app as api_router

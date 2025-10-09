@@ -24,7 +24,6 @@ class AudioIngest(Base):
     noise_analysis = sa.Column(JSONB, nullable=True)
 
     video = relationship("VideoIngest", back_populates="audio", uselist=False, lazy="select")
-    segments = relationship("AudioSegment", back_populates="audio", cascade="all, delete-orphan")
 
     __table_args__ = (
         sa.CheckConstraint(
