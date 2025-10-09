@@ -4,6 +4,7 @@ backup/*
 
 # Python
 __pycache__/
+__init__.*
 *.py[cod]
 *$py.class
 *.so
@@ -66,3 +67,5 @@ coverage.xml
 # Logs
 logs/
 *.log
+
+app/data_model/storage/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging, sys
+import torch
 from loguru import logger as custom_logger
 from starlette.config import Config
 from starlette.datastructures import CommaSeparatedStrings
@@ -15,6 +16,13 @@ ALLOWED_HOSTS: list[str] = config(
     cast=CommaSeparatedStrings,
     default="",
 )
+DEVICE_STR: str = config("DEVICE", default="cuda" if torch.cuda.is_available() else "cpu")
+try:
+    _device = torch.device(DEVICE_STR)
+except Exception:
+    _device = torch.device("cpu")
+
+DEVICE = _device
 
 AWS_ACCESS_KEY: str = config("AWS_ACCESS_KEY")
 AWS_SECRET_KEY: str = config("AWS_SECRET_KEY")
