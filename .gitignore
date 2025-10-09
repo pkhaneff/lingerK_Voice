@@ -68,4 +68,4 @@ coverage.xml
 logs/
 *.log
 
-data_model/storage/
+app/data_model/storage/
