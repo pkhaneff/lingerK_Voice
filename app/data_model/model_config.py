@@ -14,18 +14,27 @@ class VADConfig:
     model_file: str = "pytorch_model.bin"
     device: str = DEVICE
 
-@dataclass  
-class NoiseReductionConfig:
-    sample_rate: int = 48000
-    cache_dir: Path = MODEL_STORAGE_BASE / "noise_reduction"
-    model_file: str = "rnnoise_model.pt"
+@dataclass
+class OSDConfig:
+    model_name: str = "pyannote/overlapped-speech-detection"
+    hf_token: Optional[str] = None
+    cache_dir: Path = MODEL_STORAGE_BASE / "osd"
+    model_file: str = "pytorch_model.bin"
+    device: str = DEVICE
+
+@dataclass
+class SeparationConfig:
+    model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
+    cache_dir: Path = MODEL_STORAGE_BASE / "separation"
+    model_file: str = "pytorch_model.bin"
+    device: str = DEVICE
 
 MODEL_CONFIGS = {
     "vad": VADConfig(),
-    "noise_reduction": NoiseReductionConfig()
+    "osd": OSDConfig(),
+    "separation": SeparationConfig()
 }
 
-# Tạo folders khi import
 for config_name, config in MODEL_CONFIGS.items():
     if hasattr(config, 'cache_dir'):
         config.cache_dir.mkdir(parents=True, exist_ok=True)

@@ -1,11 +1,14 @@
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from loguru import logger as custom_logger
 
 from app.api.db.session import AsyncSessionLocal
 from app.api.model.audio_model import AudioIngest
 from app.api.model.video_model import VideoIngest
+from app.api.model.audio_segment_model import AudioSegment
+from app.api.model.speaker_track_model import SpeakerTrack
+from app.api.model.track_segment_model import TrackSegment
 
 
 class DBSaver:
@@ -110,11 +113,150 @@ class DBSaver:
             custom_logger.error(f"Failed to save video: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
     
+    async def save_hybrid_tracks(
+        self,
+        audio_id: str,
+        tracks: List[Dict]
+    ) -> Dict[str, Any]:
+        """
+        Save tracks using hybrid approach (2 tables).
+        
+        NOW INCLUDES: transcript and words from Whisper
+        """
+        try:
+            custom_logger.info(f"Saving {len(tracks)} hybrid tracks for audio_id={audio_id}")
+            
+            audio_uuid = uuid.UUID(audio_id)
+            track_records = []
+            segment_records = []
+            
+            for track in tracks:
+                # Create SpeakerTrack record (parent)
+                track_id = uuid.uuid4()
+                
+                speaker_track = SpeakerTrack(
+                    track_id=track_id,
+                    audio_id=audio_uuid,
+                    speaker_id=track['speaker_id'],
+                    track_type=track['type'],
+                    ranges=track['ranges'],
+                    total_duration=track['total_duration'],
+                    coverage=track['coverage'],
+                    transcript=track.get('transcript'),      # NEW: Add transcript
+                    words=track.get('words'),                # NEW: Add words
+                    created_at=datetime.utcnow()
+                )
+                track_records.append(speaker_track)
+                
+                # Create TrackSegment records for this track (children)
+                segments = track.get('segments', [])
+                custom_logger.debug(f"Track {track['speaker_id']} has {len(segments)} segments")
+                
+                for segment in segments:
+                    track_segment = TrackSegment(
+                        segment_id=uuid.uuid4(),
+                        track_id=track_id,
+                        segment_type=segment['segment_type'],
+                        start_time=segment['start_time'],
+                        end_time=segment['end_time'],
+                        duration=segment['duration'],
+                        confidence=segment.get('confidence'),
+                        separation_method=segment.get('separation_method'),
+                        created_at=datetime.utcnow()
+                    )
+                    segment_records.append(track_segment)
+            
+            # Save to database
+            async with AsyncSessionLocal() as session:
+                # Insert tracks first (parent records)
+                session.add_all(track_records)
+                await session.flush()
+                
+                # Insert segments (children records)
+                session.add_all(segment_records)
+                
+                # Commit transaction
+                await session.commit()
+                
+                custom_logger.info(
+                    f"✅ Saved {len(track_records)} tracks "
+                    f"and {len(segment_records)} segments successfully"
+                )
+                
+                return {
+                    'success': True,
+                    'data': {
+                        'tracks_saved': len(track_records),
+                        'segments_saved': len(segment_records)
+                    },
+                    'error': None
+                }
+        
+        except Exception as e:
+            custom_logger.error(f"Failed to save hybrid tracks: {str(e)}", exc_info=True)
+            return {'success': False, 'data': None, 'error': str(e)}
+
+    
+    async def save_tracks(
+        self,
+        audio_id: str,
+        tracks: List[Dict]
+    ) -> Dict[str, Any]:
+        """
+        Save tracks to database (OLD VERSION - for audio_segments table).
+        
+        DEPRECATED: Use save_hybrid_tracks() instead for new implementation.
+        
+        Args:
+            audio_id: Audio ID
+            tracks: List of track dictionaries
+            
+        Returns:
+            {'success': bool, 'data': {'tracks_saved'}, 'error': str}
+        """
+        try:
+            custom_logger.info(f"Saving {len(tracks)} tracks (old method) for audio_id={audio_id}")
+            
+            audio_uuid = uuid.UUID(audio_id)
+            track_records = []
+            
+            for track in tracks:
+                segment = AudioSegment(
+                    segment_id=uuid.uuid4(),
+                    audio_id=audio_uuid,
+                    track_type=track['type'],
+                    track_order=track['order'],
+                    start_time=track['start_time'],
+                    end_time=track['end_time'],
+                    duration=track['duration'],
+                    coverage=track['coverage'],
+                    osd_confidence=track.get('osd_confidence'),
+                    created_at=datetime.utcnow()
+                )
+                track_records.append(segment)
+            
+            async with AsyncSessionLocal() as session:
+                session.add_all(track_records)
+                await session.commit()
+                
+                custom_logger.info(f"Saved {len(track_records)} tracks successfully")
+                
+                return {
+                    'success': True,
+                    'data': {'tracks_saved': len(track_records)},
+                    'error': None
+                }
+        
+        except Exception as e:
+            custom_logger.error(f"Failed to save tracks: {str(e)}", exc_info=True)
+            return {'success': False, 'data': None, 'error': str(e)}
+    
     async def update_processing_results(
         self,
         audio_id: str,
         noise_analysis: Dict,
-        vad_analysis: Dict
+        vad_analysis: Dict,
+        osd_analysis: Dict
     ) -> Dict[str, Any]:
         """
         Update audio record with processing results.
@@ -123,6 +265,7 @@ class DBSaver:
             audio_id: Audio ID
             noise_analysis: Noise reduction analysis
             vad_analysis: VAD analysis
+            osd_analysis: OSD analysis
             
         Returns:
             {'success': bool, 'data': None, 'error': str}
@@ -135,13 +278,17 @@ class DBSaver:
                     custom_logger.error(f"Audio {audio_id} not found")
                     return {'success': False, 'data': None, 'error': 'Audio not found'}
                 
-                # Combine analyses
+                # Combine all analyses
                 combined_analysis = {
                     'noise_segments': noise_analysis.get('noise_segments', []),
-                    'vad_segments': vad_analysis.get('vad_segments', []),
+                    'vad_timeline': vad_analysis.get('vad_timeline', []),
+                    'vad_statistics': vad_analysis.get('statistics', {}),
+                    'osd_track_type': osd_analysis.get('track_type', 'unknown'),
+                    'osd_tracks': osd_analysis.get('tracks', []),
                     'statistics': {
                         **noise_analysis.get('statistics', {}),
-                        **vad_analysis.get('statistics', {})
+                        **vad_analysis.get('statistics', {}),
+                        **osd_analysis.get('statistics', {})
                     },
                     'processed_at': datetime.utcnow().isoformat()
                 }

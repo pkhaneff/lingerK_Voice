@@ -1,5 +1,5 @@
 from __future__ import annotations
-import logging, sys
+import logging, sys, os
 import torch
 from loguru import logger as custom_logger
 from starlette.config import Config
@@ -16,13 +16,25 @@ ALLOWED_HOSTS: list[str] = config(
     cast=CommaSeparatedStrings,
     default="",
 )
-DEVICE_STR: str = config("DEVICE", default="cuda" if torch.cuda.is_available() else "cpu")
-try:
-    _device = torch.device(DEVICE_STR)
-except Exception:
-    _device = torch.device("cpu")
+def _probe_cuda() -> torch.device:
+    wanted = config("DEVICE", default="cuda" if torch.cuda.is_available() else "cpu")
+    if wanted != "cuda":
+        return torch.device("cpu")
 
-DEVICE = _device
+    try:
+        if not torch.cuda.is_available():
+            raise RuntimeError("torch.cuda.is_available() = False")
+        _ = torch.cuda.device_count()           
+        _ = torch.cuda.current_device()          
+        _ = torch.cuda.get_device_name(0)        
+        custom_logger.info("CUDA probe OK")
+        return torch.device("cuda")
+    except Exception as e:
+        custom_logger.warning(f"CUDA probe failed -> fallback CPU: {e}")
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        return torch.device("cpu")
+
+DEVICE = _probe_cuda()
 
 AWS_ACCESS_KEY: str = config("AWS_ACCESS_KEY")
 AWS_SECRET_KEY: str = config("AWS_SECRET_KEY")
