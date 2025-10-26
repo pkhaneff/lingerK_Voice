@@ -10,10 +10,10 @@ class AudioIngest(Base):
     audio_id     = sa.Column(UUID(as_uuid=True), primary_key=True,
                              server_default=sa.text("gen_random_uuid()"))
     file_name    = sa.Column(sa.String(255), nullable=False)
-    storage_uri  = sa.Column(sa.Text, nullable=False)            # S3 URI/path
-    duration     = sa.Column(sa.Float, nullable=True)            # seconds
+    storage_uri  = sa.Column(sa.Text, nullable=False)            
+    duration     = sa.Column(sa.Float, nullable=True)            
     codec        = sa.Column(sa.String(50), nullable=True)
-    user_id      = sa.Column(UUID(as_uuid=True), nullable=False) # hoặc FK tới users
+    user_id      = sa.Column(UUID(as_uuid=True), nullable=False) 
     status       = sa.Column(sa.String(20), nullable=False,
                              server_default=sa.text("'uploaded'"))
     preprocessed = sa.Column(sa.Boolean, nullable=False, server_default=sa.text("false"))
@@ -24,6 +24,8 @@ class AudioIngest(Base):
     noise_analysis = sa.Column(JSONB, nullable=True)
 
     video = relationship("VideoIngest", back_populates="audio", uselist=False, lazy="select")
+    segments = relationship("AudioSegment", back_populates="audio", lazy="select")
+    speaker_tracks = relationship("SpeakerTrack", back_populates="audio", lazy="select")
 
     __table_args__ = (
         sa.CheckConstraint(
