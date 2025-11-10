@@ -42,13 +42,11 @@ class VADAnalyzer:
             if not Path(cleaned_audio_path).exists():
                 return {'success': False, 'data': None, 'error': f'File not found'}
             
-            # Run prediction
             vad_output = await self.vad_model.predict(cleaned_audio_path)
             
             if not vad_output:
                 return {'success': False, 'data': None, 'error': 'VAD prediction failed'}
             
-            # Extract timeline
             vad_timeline = []
             total_voice_duration = 0.0
             
@@ -60,7 +58,6 @@ class VADAnalyzer:
                 vad_timeline.append((start_time, end_time))
                 total_voice_duration += duration
             
-            # Calculate statistics
             file_size = Path(cleaned_audio_path).stat().st_size
             estimated_duration = max(total_voice_duration, file_size / (16000 * 2))
             voice_ratio = total_voice_duration / estimated_duration if estimated_duration > 0 else 0.0

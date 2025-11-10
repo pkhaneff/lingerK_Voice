@@ -4,23 +4,24 @@ import asyncio
 import functools
 import re
 import torch
+import librosa
+import numpy as np
 from loguru import logger as custom_logger
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
 
 class WhisperTranscriber:
-    """Transcribe audio using Whisper large-v3 - Optimized for Vietnamese."""
     
     def __init__(self):
         self.model = None
         self.processor = None
-        self.device = None  # Will be set during load
+        self.device = None 
         self.is_loaded = False
         self._check_availability()
     
     def _check_availability(self):
         """Check if transformers is available."""
         try:
-            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
             self.available = True
             custom_logger.info("Transformers available")
         except ImportError:
@@ -42,7 +43,7 @@ class WhisperTranscriber:
             return True
         
         try:
-            custom_logger.info("Loading Whisper large-v3 (optimized for Vietnamese)...")
+            custom_logger.info("Loading PhoWhisper-medium (VinAI's Vietnamese ASR model)...")
             
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._load_sync)
@@ -51,11 +52,10 @@ class WhisperTranscriber:
                 custom_logger.error("Model or processor is None after loading")
                 return False
             
-            # Cleanup unused files after first load
             self._cleanup_unused_files()
             
             self.is_loaded = True
-            custom_logger.info("âœ… Whisper loaded successfully")
+            custom_logger.info("PhoWhisper loaded successfully")
             return True
             
         except Exception as e:
@@ -64,42 +64,35 @@ class WhisperTranscriber:
     
     def _load_sync(self):
         """Sync load - optimized version with GPU support."""
-        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
         
-        model_id = "openai/whisper-medium"
-        cache_dir = "app/data_model/storage/whisper"
+        model_id = "vinai/PhoWhisper-medium"
+        cache_dir = "app/data_model/storage/phowhisper"
         
         custom_logger.info(f"Loading from: {model_id}")
         custom_logger.info(f"Cache dir: {cache_dir}")
         
-        # âœ… Auto-detect device (GPU/CPU)
         if torch.cuda.is_available():
             device = "cuda"
-            torch_dtype = torch.float16  # FP16 for GPU
-            custom_logger.info(f"ðŸš€ Using GPU: {torch.cuda.get_device_name(0)}")
+            torch_dtype = torch.float16 
+            custom_logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
             custom_logger.info(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
         else:
             device = "cpu"
-            torch_dtype = torch.float32  # FP32 for CPU
-            custom_logger.info("ðŸ’» Using CPU")
+            torch_dtype = torch.float32  
+            custom_logger.info(" Using CPU")
         
-        # âœ… Load model with device-specific settings
         self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
             model_id,
-            torch_dtype=torch_dtype,        # FP16 for GPU, FP32 for CPU
-            # low_cpu_mem_usage=True,         # Reduce RAM during load
-            use_safetensors=True,           # Use .safetensors format (faster)
+            torch_dtype=torch_dtype,        
+            low_cpu_mem_usage=True,      
             cache_dir=cache_dir,
-            attn_implementation="sdpa"      # Use scaled dot-product attention
         )
         
-        # Move model to device
         self.model.to(device)
         self.device = device
         
         custom_logger.info(f"Model loaded on {device}, loading processor...")
         
-        # âœ… Load processor (tokenizer + feature extractor)
         self.processor = AutoProcessor.from_pretrained(
             model_id,
             cache_dir=cache_dir
@@ -107,30 +100,30 @@ class WhisperTranscriber:
         
         custom_logger.info("Processor loaded, configuring for Vietnamese...")
         
-        # âœ… Configure for Vietnamese transcription
         self.model.generation_config.language = "vi"
         self.model.generation_config.task = "transcribe"
         
-        # âœ… Disable internal VAD logic (we have our own VAD)
         self.model.generation_config.condition_on_prev_tokens = False
-        self.model.generation_config.no_speech_threshold = 1.0  # Assume all speech
+        self.model.generation_config.no_speech_threshold = 1.0 
         
-        custom_logger.info(f"âœ… Configuration completed on {device}")
+        self.model.generation_config.logprob_threshold = None
+        self.model.generation_config.compression_ratio_threshold = None
+        
+        custom_logger.info(f"Configuration completed on {device}")
     
     def _cleanup_unused_files(self):
         """Remove unnecessary files to save disk space."""
-        cache_path = Path("app/data_model/storage/whisper")
+        cache_path = Path("app/data_model/storage/phowhisper")
         
         if not cache_path.exists():
             return
         
-        # Files khÃ´ng cáº§n thiáº¿t
         unused_patterns = [
-            "**/pytorch_model.bin",      # Duplicate cá»§a safetensors
-            "**/flax_model.msgpack",     # Flax version (khÃ´ng dÃ¹ng)
-            "**/model.fp32*.safetensors", # FP32 version (náº¿u Ä‘Ã£ cÃ³ FP16)
+            "**/pytorch_model.bin",
+            "**/flax_model.msgpack",
+            "**/model.fp32*.safetensors",
             "**/pytorch_model.fp32*.bin",
-            "**/normalizer.json",        # English normalizer (khÃ´ng cáº§n cho VI)
+            "**/normalizer.json",  
         ]
         
         deleted_size = 0
@@ -236,23 +229,48 @@ class WhisperTranscriber:
                     'error': 'Model or processor is None'
                 }
             
-            # Load audio (librosa automatically resamples to 16kHz)
-            import librosa
             audio, sr = librosa.load(audio_path, sr=16000, mono=True)
             
-            # ===== LOG AUDIO INPUT STATS =====
+            custom_logger.info("Enhanced Transcription v2.0 - Debug fixes enabled!")
+            
             duration = len(audio) / sr
-            non_zero = np.count_nonzero(np.abs(audio) > 0.001)
-            voice_samples = non_zero
-            silence_samples = len(audio) - non_zero
+            frame_length = int(0.025 * sr)  
+            hop_length = int(0.010 * sr) 
             
-            custom_logger.info(f"📥 Whisper Input Audio Stats:")
-            custom_logger.info(f"   Duration: {duration:.2f}s ({len(audio)} samples)")
-            custom_logger.info(f"   Voice samples: {voice_samples} ({voice_samples/len(audio)*100:.1f}%)")
-            custom_logger.info(f"   Silence samples: {silence_samples} ({silence_samples/len(audio)*100:.1f}%)")
-            # =================================
+            rms = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=hop_length)[0]
             
-            # âœ… Convert audio to mel-spectrogram (using preprocessor_config.json)
+            mean_rms = np.mean(rms)
+            std_rms = np.std(rms)
+            dynamic_threshold = max(0.001, mean_rms - 0.5 * std_rms)  
+            
+            voice_frames = np.sum(rms > dynamic_threshold)
+            silence_frames = len(rms) - voice_frames
+            
+            voice_samples_estimate = int(voice_frames * hop_length)
+            silence_samples_estimate = len(audio) - voice_samples_estimate
+            
+            voice_percentage = voice_samples_estimate / len(audio) * 100
+            silence_percentage = silence_samples_estimate / len(audio) * 100
+            
+            max_amplitude = np.max(np.abs(audio))
+            audio_rms = np.sqrt(np.mean(audio**2))
+            zero_crossings = np.sum(np.diff(np.signbit(audio)))
+            
+            custom_logger.info(f"Whisper Input Audio Stats:")
+            custom_logger.info(f"Duration: {duration:.2f}s ({len(audio)} samples)")
+            custom_logger.info(f"Voice estimate: {voice_samples_estimate} samples ({voice_percentage:.1f}%)")
+            custom_logger.info(f"Silence estimate: {silence_samples_estimate} samples ({silence_percentage:.1f}%)")
+            custom_logger.info(f"Quality: max_amp={max_amplitude:.4f}, rms={audio_rms:.4f}, zcr={zero_crossings}")
+            custom_logger.info(f"RMS threshold: {dynamic_threshold:.4f} (adaptive)")
+            
+            if max_amplitude < 0.01:
+                custom_logger.warning("Very low audio amplitude - may affect transcription quality")
+            if voice_percentage < 50:
+                custom_logger.warning("Low voice content detected - check audio preprocessing")
+            if audio_rms < 0.005:
+                custom_logger.warning("Very quiet audio - consider audio normalization")
+
+            
             inputs = self.processor(
                 audio,
                 sampling_rate=16000,
@@ -260,64 +278,202 @@ class WhisperTranscriber:
                 return_attention_mask=True
             )
             
-            # âœ… Move inputs to device (GPU/CPU)
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            if self.device == "cuda":
+                inputs = {k: v.to(self.device).half() for k, v in inputs.items()}
+            else:
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
             custom_logger.debug(f"Audio preprocessed to mel-spectrogram on {self.device}")
             
-            # âœ… Generate transcription with word timestamps
+            duration_minutes = duration / 60.0
+            dynamic_max_tokens = max(1500, int(duration_minutes * 400 * 1.3))  
+            dynamic_max_tokens = min(dynamic_max_tokens, 4096)  # Cap at 4096
+            
+            custom_logger.info(f"Dynamic max_tokens: {dynamic_max_tokens} (duration: {duration:.1f}s, {duration_minutes:.1f}min)")
+            
+            if duration > 300:
+                custom_logger.warning(f"Very long audio ({duration:.1f}s). Risk of GPU OOM. Consider segmentation.")
+            elif duration > 180:
+                custom_logger.info(f"Long audio ({duration:.1f}s). Monitoring GPU memory usage.")
+            
             gen_kwargs = {
                 "language": language,
                 "task": "transcribe",
-                
-                # ===== DISABLE VAD LOGIC (we use our own VAD) =====
-                "condition_on_prev_tokens": False,
-                "no_speech_threshold": 1.0,       # Assume all is speech
-                "logprob_threshold": -1.0,        # Don't filter by log prob
-                "compression_ratio_threshold": 10.0,  # Don't filter by compression
-                
-                # ===== ENABLE WORD TIMESTAMPS =====
                 "return_timestamps": True,
+                "do_sample": False,
+                "num_beams": 1,
+                "max_new_tokens": dynamic_max_tokens,
                 
-                # ===== GENERATION SETTINGS =====
-                "num_beams": 1,                   # Greedy search (faster)
-                "max_new_tokens": 448,
+                "condition_on_prev_tokens": False,
+                "no_speech_threshold": None,           
+                "logprob_threshold": None,               
+                "compression_ratio_threshold": None,   
+                
+                "use_cache": True,
+                "forced_decoder_ids": None,
+                "suppress_tokens": None,
+                "pad_token_id": self.processor.tokenizer.pad_token_id,
+                "eos_token_id": self.processor.tokenizer.eos_token_id,
+                
+                "min_length": max(200, int(duration_minutes * 150)),  
+                "length_penalty": 1.0,                            
+                "repetition_penalty": 1.0,                        
+                "no_repeat_ngram_size": 0,                         
             }
             
             custom_logger.info(f"Generating transcription on {self.device}...")
+            custom_logger.info(f"Expected tokens needed: ~{int(duration_minutes * 300)} (based on duration)")
             
-            # Generate token IDs
-            pred_ids = self.model.generate(**inputs, **gen_kwargs)
+            original_config = {}
+            if hasattr(self.model, 'generation_config'):
+                config = self.model.generation_config
+                original_config = {
+                    'no_speech_threshold': getattr(config, 'no_speech_threshold', None),
+                    'logprob_threshold': getattr(config, 'logprob_threshold', None),
+                    'compression_ratio_threshold': getattr(config, 'compression_ratio_threshold', None),
+                }
+                
+                config.no_speech_threshold = None
+                config.logprob_threshold = None  
+                config.compression_ratio_threshold = None
+                custom_logger.info("Model generation config overridden")
             
-            custom_logger.debug(f"Generated {pred_ids.shape[1]} tokens")
+            custom_logger.info(f"Early stopping disabled: no_speech_threshold={gen_kwargs['no_speech_threshold']}")
+            custom_logger.info(f"Early stopping disabled: logprob_threshold={gen_kwargs['logprob_threshold']}")
+            custom_logger.info(f"Early stopping disabled: compression_ratio_threshold={gen_kwargs['compression_ratio_threshold']}")
+            custom_logger.info(f"Min generation length: {gen_kwargs['min_length']} tokens")
             
-            # âœ… Decode with timestamps
-            # skip_special_tokens=False to keep timestamp tokens
+            custom_logger.info("Starting token generation with enhanced debugging...")
+            try:
+                pred_ids = self.model.generate(**inputs, **gen_kwargs)
+                
+                try:
+                    from .whisper_generation_debug import debug_whisper_generation
+                    debug_result = debug_whisper_generation(
+                        self.processor, self.model, pred_ids, duration, dynamic_max_tokens
+                    )
+                    
+                    if debug_result:
+                        tokens_info = debug_result['tokens']
+                        eos_info = debug_result['eos'] 
+                        quality_info = debug_result['quality']
+                        
+                        custom_logger.info(f"Generation Analysis:")
+                        custom_logger.info(f"Content tokens: {tokens_info['content']}")
+                        custom_logger.info(f"Quality status: {quality_info['token_count_status']}")
+                        custom_logger.info(f"Quality score: {quality_info['quality_score']}/100")
+                        
+                        if eos_info['found']:
+                            custom_logger.info(f"EOS found at position: {eos_info['first_position']}")
+                            if eos_info['early_termination']:
+                                custom_logger.error("EARLY EOS TERMINATION DETECTED!")
+                                custom_logger.error("This explains the incomplete transcription!")
+                            else:
+                                custom_logger.info("EOS at end - normal termination")
+                        else:
+                            custom_logger.info("No EOS found - may have hit max_tokens")
+                        
+                        # Quality alerts
+                        if quality_info['early_stop_risk']:
+                            custom_logger.warning("Early stopping risk detected!")
+                        
+                        if quality_info['recommendations']:
+                            custom_logger.info("Recommendations:")
+                            for rec in quality_info['recommendations'][:3]:
+                                custom_logger.info(f"{rec}")
+                    else:
+                        custom_logger.warning("Generation debugging returned no results")
+                        
+                except ImportError as e:
+                    custom_logger.warning(f"Generation debugging not available: {e}")
+                    generated_tokens = pred_ids.shape[1]
+                    expected_tokens = int(duration_minutes * 300)
+                    coverage_ratio = generated_tokens / expected_tokens if expected_tokens > 0 else 0
+                    
+                    custom_logger.info(f"Basic Analysis (fallback):")
+                    custom_logger.info(f"Generated tokens: {generated_tokens}")
+                    custom_logger.info(f"Expected tokens: ~{expected_tokens}")
+                    custom_logger.info(f"Coverage ratio: {coverage_ratio:.2f} ({coverage_ratio*100:.1f}%)")
+                    
+                    if coverage_ratio < 0.5:
+                        custom_logger.error("SEVERELY LOW TOKEN COUNT - likely early termination!")
+                    elif coverage_ratio < 0.8:
+                        custom_logger.warning("Low token count - may be incomplete transcription")
+                        
+                except Exception as e:
+                    custom_logger.error(f"Generation debugging failed: {e}", exc_info=True)
+                
+                if pred_ids is None or pred_ids.size(1) == 0:
+                    custom_logger.error("Generation failed: Empty pred_ids")
+                    return {
+                        'success': False,
+                        'data': None,
+                        'error': 'Generation failed: No tokens generated'
+                    }
+                
+                generated_tokens = pred_ids.shape[1]
+                custom_logger.info(f"Generated {generated_tokens} tokens (max allowed: {dynamic_max_tokens})")
+                
+                if generated_tokens < 5: 
+                    custom_logger.error(f"Generation failed: Only {generated_tokens} tokens generated")
+                    return {
+                        'success': False,
+                        'data': None,
+                        'error': f'Generation failed: Insufficient tokens ({generated_tokens})'
+                    }
+                    
+            except torch.cuda.OutOfMemoryError as e:
+                custom_logger.error(f"CUDA OOM during generation: {e}")
+                torch.cuda.empty_cache()
+                return {
+                    'success': False,
+                    'data': None,
+                    'error': f'GPU memory exceeded. Audio too long ({duration:.1f}s). Try shorter audio segments.'
+                }
+            except Exception as e:
+                custom_logger.error(f"Generation failed: {e}", exc_info=True)
+                return {
+                    'success': False,
+                    'data': None,
+                    'error': f'Generation error: {str(e)}'
+                }
+            
+            if hasattr(self.model, 'generation_config') and original_config:
+                config = self.model.generation_config
+                config.no_speech_threshold = original_config['no_speech_threshold']
+                config.logprob_threshold = original_config['logprob_threshold'] 
+                config.compression_ratio_threshold = original_config['compression_ratio_threshold']
+                custom_logger.debug("Model generation config restored")
+            
             decoded = self.processor.batch_decode(
                 pred_ids,
                 skip_special_tokens=False
             )
             
+            if not decoded or len(decoded) == 0:
+                custom_logger.error("Decoding failed: Empty decoded results")
+                return {
+                    'success': False,
+                    'data': None,
+                    'error': 'Decoding failed: No text generated'
+                }
+            
             raw_text = decoded[0]
             custom_logger.debug(f"Raw decoded text length: {len(raw_text)}")
             
-            # âœ… Parse word timestamps from decoded text
             words = self._parse_word_timestamps(raw_text)
             
-            # âœ… Extract clean text (remove timestamp tokens)
             clean_text = self._remove_timestamp_tokens(raw_text)
             
-            # ===== LOG TRANSCRIPT OUTPUT =====
-            custom_logger.info(f"\n📝 Whisper Output:")
-            custom_logger.info(f"   Text length: {len(clean_text)} chars")
-            custom_logger.info(f"   Words count: {len(words)}")
-            custom_logger.info(f"   Preview: {clean_text[:200]}")
+            custom_logger.info(f"\nWhisper Output:")
+            custom_logger.info(f"Text length: {len(clean_text)} chars")
+            custom_logger.info(f"Words count: {len(words)}")
+            custom_logger.info(f"Preview: {clean_text[:200]}")
             if len(clean_text) > 200:
-                custom_logger.info(f"   ... (truncated)")
-            # ================================
+                custom_logger.info(f"(truncated)")
             
             custom_logger.info(
-                f"âœ… Transcription completed: {len(clean_text)} chars, "
+                f"Transcription completed: {len(clean_text)} chars, "
                 f"{len(words)} words"
             )
             
@@ -325,7 +481,7 @@ class WhisperTranscriber:
                 'success': True,
                 'data': {
                     'text': clean_text,
-                    'segments': [],  # Not used (we have word-level instead)
+                    'segments': [], 
                     'words': words
                 },
                 'error': None
@@ -355,44 +511,35 @@ class WhisperTranscriber:
         try:
             words = []
             
-            # Pattern to match timestamp tokens: <|12.34|>
             timestamp_pattern = r'<\|(\d+\.\d+)\|>'
             
-            # Split by timestamps
             parts = re.split(timestamp_pattern, raw_text)
-            
-            # parts = ['', '0.00', 'word1 word2', '2.50', 'word3', '5.00', '']
-            # Odd indices are timestamps, even indices are text
             
             timestamps = []
             texts = []
             
             for i, part in enumerate(parts):
-                if i % 2 == 1:  # Timestamp
+                if i % 2 == 1:  
                     try:
                         timestamps.append(float(part))
                     except ValueError:
                         custom_logger.warning(f"Invalid timestamp: {part}")
-                elif i % 2 == 0 and part.strip():  # Text
+                elif i % 2 == 0 and part.strip():
                     texts.append(part.strip())
             
-            # Match texts with timestamps
             for i, text in enumerate(texts):
                 start_time = timestamps[i] if i < len(timestamps) else 0.0
                 end_time = timestamps[i + 1] if i + 1 < len(timestamps) else start_time + 1.0
                 
-                # Split text into individual words
                 word_tokens = text.split()
                 
                 if not word_tokens:
                     continue
                 
-                # Distribute time evenly across words in this segment
                 segment_duration = end_time - start_time
                 time_per_word = segment_duration / len(word_tokens) if len(word_tokens) > 0 else 0
                 
                 for j, word in enumerate(word_tokens):
-                    # Clean word (remove special tokens)
                     clean_word = self._clean_word(word)
                     
                     if not clean_word:
@@ -405,7 +552,7 @@ class WhisperTranscriber:
                         'word': clean_word,
                         'start': float(word_start),
                         'end': float(word_end),
-                        'confidence': 1.0  # Whisper doesn't provide word-level confidence
+                        'confidence': 1.0 
                     })
             
             custom_logger.debug(f"Parsed {len(words)} words with timestamps")
@@ -421,13 +568,10 @@ class WhisperTranscriber:
         
         Keep Vietnamese characters and basic punctuation.
         """
-        # Remove Whisper special tokens
         word = re.sub(r'<\|[^|]+\|>', '', word)
         
-        # Remove leading/trailing whitespace
         word = word.strip()
         
-        # Remove standalone punctuation-only tokens
         if re.match(r'^[^\w\s]+$', word):
             return ''
         
@@ -436,16 +580,11 @@ class WhisperTranscriber:
     def _remove_timestamp_tokens(self, raw_text: str) -> str:
         """
         Remove timestamp tokens from text.
-        
-        Example: '<|0.00|>Hello world<|2.50|>' â†’ 'Hello world'
         """
-        # Remove all timestamp tokens
         clean_text = re.sub(r'<\|[\d.]+\|>', '', raw_text)
         
-        # Remove other special tokens
         clean_text = re.sub(r'<\|[^|]+\|>', '', clean_text)
         
-        # Clean up extra whitespace
         clean_text = ' '.join(clean_text.split())
         
         return clean_text.strip()
@@ -465,7 +604,6 @@ class WhisperTranscriber:
             
             self.is_loaded = False
             
-            # Clear CUDA cache if available
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 custom_logger.debug("CUDA cache cleared")

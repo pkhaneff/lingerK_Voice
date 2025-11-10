@@ -34,8 +34,7 @@ class S3Uploader:
             
             custom_logger.info(f"Uploading to S3: {full_s3_key}, size: {file_size:,} bytes")
             
-            # Choose upload method
-            if file_size > 100 * 1024 * 1024:  # > 100MB
+            if file_size > 100 * 1024 * 1024:  
                 result = await self._multipart_upload(file, full_s3_key, file_size)
             else:
                 result = await self._direct_upload(file, full_s3_key, file_size)
@@ -131,7 +130,6 @@ class S3Uploader:
             chunk_size = self._calculate_chunk_size(file_size)
             content_type = self._detect_content_type(file.filename)
             
-            # Initiate
             response = self.s3_client.create_multipart_upload(
                 Bucket=self.bucket_name,
                 Key=s3_key,
@@ -140,7 +138,6 @@ class S3Uploader:
             upload_id = response['UploadId']
             custom_logger.info(f"Multipart upload initiated: {upload_id}")
             
-            # Upload parts
             await file.seek(0)
             parts = []
             part_number = 1
@@ -172,7 +169,6 @@ class S3Uploader:
                 progress = (bytes_uploaded / file_size) * 100
                 custom_logger.info(f"Upload progress: {progress:.1f}%")
             
-            # Complete
             self.s3_client.complete_multipart_upload(
                 Bucket=self.bucket_name,
                 Key=s3_key,
@@ -212,12 +208,12 @@ class S3Uploader:
     
     def _calculate_chunk_size(self, file_size: int) -> int:
         """Calculate optimal chunk size"""
-        if file_size < 200 * 1024 * 1024:  # < 200MB
-            return 10 * 1024 * 1024  # 10MB
-        elif file_size < 500 * 1024 * 1024:  # 200MB - 500MB
-            return 25 * 1024 * 1024  # 25MB
-        else:  # > 500MB
-            return 50 * 1024 * 1024  # 50MB
+        if file_size < 200 * 1024 * 1024: 
+            return 10 * 1024 * 1024 
+        elif file_size < 500 * 1024 * 1024: 
+            return 25 * 1024 * 1024  
+        else:  
+            return 50 * 1024 * 1024  
     
     def _detect_content_type(self, filename: str) -> str:
         """Detect content type from filename"""

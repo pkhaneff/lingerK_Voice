@@ -14,22 +14,18 @@ class TrackSegment(Base):
                         sa.ForeignKey("speaker_tracks.track_id", ondelete="CASCADE"),
                         nullable=False)
     
-    # Segment classification
     segment_type = sa.Column(sa.String(20), nullable=False)
     
-    # Time information
     start_time = sa.Column(sa.Float, nullable=False)
     end_time = sa.Column(sa.Float, nullable=False)
     duration = sa.Column(sa.Float, nullable=False)
     
-    # Quality metrics
     confidence = sa.Column(sa.Float, nullable=True)
     separation_method = sa.Column(sa.String(50), nullable=True)
     
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False,
                           server_default=sa.text("NOW()"))
     
-    # Relationship
     track = relationship("SpeakerTrack", back_populates="segments", lazy="select")
 
     __table_args__ = (

@@ -1,0 +1,259 @@
+"""
+Comprehensive Whisper Generation Debugging & Token Tracking
+
+Scalable solution for debugging early stopping and monitoring generation quality.
+"""
+
+import torch
+from typing import Dict, List, Tuple, Any
+from loguru import logger as custom_logger
+
+
+class WhisperGenerationDebugger:
+    """
+    Advanced debugging for Whisper generation issues.
+    
+    Features:
+    - Proper token counting for Whisper architecture
+    - Early stopping detection with root cause analysis
+    - Generation quality metrics
+    - Scalable monitoring and alerting
+    """
+    
+    def __init__(self, processor, model):
+        self.processor = processor
+        self.model = model
+        
+        self.special_tokens = {
+            'start': self.processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>"),
+            'language': self.processor.tokenizer.convert_tokens_to_ids("<|vi|>"), 
+            'task': self.processor.tokenizer.convert_tokens_to_ids("<|transcribe|>"),
+            'eos': self.processor.tokenizer.eos_token_id,
+            'pad': self.processor.tokenizer.pad_token_id,
+        }
+        
+        self.prompt_length = 3 
+    
+    def analyze_generation(
+        self, 
+        pred_ids: torch.Tensor,
+        audio_duration: float,
+        max_tokens: int
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive analysis of generation results.
+        
+        Args:
+            pred_ids: Generated token sequence [batch_size, seq_len]
+            audio_duration: Audio duration in seconds
+            max_tokens: Maximum tokens allowed
+            
+        Returns:
+            Detailed analysis with metrics and alerts
+        """
+        sequence = pred_ids[0].cpu().tolist()  
+        
+        total_tokens = len(sequence)
+        content_tokens = total_tokens - self.prompt_length
+        
+        eos_analysis = self._analyze_eos_tokens(sequence)
+        
+        metrics = self._calculate_metrics(content_tokens, audio_duration)
+        
+        quality = self._assess_generation_quality(
+            sequence, content_tokens, audio_duration, max_tokens
+        )
+        
+        result = {
+            'tokens': {
+                'total': total_tokens,
+                'prompt': self.prompt_length,
+                'content': content_tokens,
+                'max_allowed': max_tokens
+            },
+            'eos': eos_analysis,
+            'metrics': metrics,
+            'quality': quality,
+            'sequence_preview': sequence[:20],  
+        }
+        
+        self._log_analysis(result, audio_duration)
+        
+        return result
+    
+    def _analyze_eos_tokens(self, sequence: List[int]) -> Dict[str, Any]:
+        """Analyze EOS token positions and patterns."""
+        eos_positions = [i for i, token in enumerate(sequence) if token == self.special_tokens['eos']]
+        
+        analysis = {
+            'found': len(eos_positions) > 0,
+            'positions': eos_positions,
+            'count': len(eos_positions)
+        }
+        
+        if eos_positions:
+            first_eos = eos_positions[0]
+            analysis.update({
+                'first_position': first_eos,
+                'early_termination': first_eos < len(sequence) - 5,  
+                'content_before_eos': first_eos - self.prompt_length
+            })
+        
+        return analysis
+    
+    def _calculate_metrics(self, content_tokens: int, audio_duration: float) -> Dict[str, float]:
+        """Calculate generation rate metrics."""
+        duration_minutes = audio_duration / 60.0
+        
+        return {
+            'tokens_per_second': content_tokens / audio_duration if audio_duration > 0 else 0,
+            'tokens_per_minute': content_tokens / duration_minutes if duration_minutes > 0 else 0,
+            'audio_duration': audio_duration,
+            'duration_minutes': duration_minutes
+        }
+    
+    def _assess_generation_quality(
+        self, 
+        sequence: List[int], 
+        content_tokens: int, 
+        audio_duration: float,
+        max_tokens: int
+    ) -> Dict[str, Any]:
+        """Assess generation quality and detect issues."""
+        duration_minutes = audio_duration / 60.0
+        
+        expected_min_tokens = max(50, int(duration_minutes * 100))  
+        expected_optimal_tokens = int(duration_minutes * 300)      
+        expected_max_tokens = int(duration_minutes * 500)         
+        
+        assessments = {
+            'token_count_status': self._assess_token_count(
+                content_tokens, expected_min_tokens, expected_optimal_tokens
+            ),
+            'truncation_risk': content_tokens >= max_tokens - 10,
+            'early_stop_risk': content_tokens < expected_min_tokens,
+            'optimal_range': expected_min_tokens <= content_tokens <= expected_optimal_tokens,
+            'expected_ranges': {
+                'minimum': expected_min_tokens,
+                'optimal': expected_optimal_tokens,
+                'maximum': expected_max_tokens
+            }
+        }
+        
+        quality_score = self._calculate_quality_score(content_tokens, expected_optimal_tokens)
+        assessments['quality_score'] = quality_score
+        
+        assessments['recommendations'] = self._generate_recommendations(assessments)
+        
+        return assessments
+    
+    def _assess_token_count(self, actual: int, min_expected: int, optimal_expected: int) -> str:
+        """Categorize token count quality."""
+        if actual < min_expected * 0.5:
+            return "SEVERELY_LOW"
+        elif actual < min_expected:
+            return "LOW"
+        elif actual < optimal_expected:
+            return "ACCEPTABLE"
+        elif actual < optimal_expected * 1.5:
+            return "GOOD"
+        else:
+            return "HIGH"
+    
+    def _calculate_quality_score(self, actual_tokens: int, optimal_tokens: int) -> int:
+        """Calculate quality score 0-100."""
+        if optimal_tokens == 0:
+            return 0
+            
+        ratio = actual_tokens / optimal_tokens
+        
+        if ratio >= 0.8 and ratio <= 1.2:  
+            return 100
+        elif ratio >= 0.6 and ratio <= 1.5:  
+            return max(60, 100 - int(abs(ratio - 1.0) * 100))
+        elif ratio >= 0.3:  
+            return max(30, 60 - int(abs(ratio - 1.0) * 50))
+        else:  # Very low
+            return max(0, 30 - int(abs(ratio - 1.0) * 30))
+    
+    def _generate_recommendations(self, assessments: Dict[str, Any]) -> List[str]:
+        """Generate actionable recommendations based on assessment."""
+        recommendations = []
+        
+        if assessments['early_stop_risk']:
+            recommendations.extend([
+                "Increase max_new_tokens limit",
+                "Check for EOS token early termination", 
+                "Review generation config thresholds",
+                "Verify audio preprocessing quality"
+            ])
+        
+        if assessments['truncation_risk']:
+            recommendations.extend([
+                "Increase max_new_tokens for longer audio",
+                "Consider audio segmentation for very long files"
+            ])
+        
+        if assessments['token_count_status'] == "SEVERELY_LOW":
+            recommendations.extend([
+                "Check audio quality and noise level",
+                "Verify VAD segmentation accuracy",
+                "Review model loading and device configuration"
+            ])
+        
+        if not assessments['optimal_range']:
+            recommendations.append("Monitor generation patterns for consistency")
+        
+        return recommendations
+    
+    def _log_analysis(self, analysis: Dict[str, Any], audio_duration: float):
+        """Log comprehensive analysis results."""
+        tokens = analysis['tokens']
+        quality = analysis['quality']
+        eos = analysis['eos']
+        metrics = analysis['metrics']
+        
+        custom_logger.info(f"\nWhisper Generation Analysis:")
+        custom_logger.info(f"Tokens: {tokens['content']} content + {tokens['prompt']} prompt = {tokens['total']} total")
+        custom_logger.info(f"Rate: {metrics['tokens_per_minute']:.1f} tokens/min ({metrics['tokens_per_second']:.2f} tokens/sec)")
+        custom_logger.info(f"Quality: {quality['quality_score']}/100 ({quality['token_count_status']})")
+        
+        if eos['found']:
+            custom_logger.info(f"EOS: Found at position {eos['first_position']} ({eos['content_before_eos']} content tokens)")
+            if eos['early_termination']:
+                custom_logger.warning(f"EOS early termination detected!")
+        else:
+            custom_logger.info(f"EOS: Not found (may hit max_tokens limit)")
+        
+        if quality['early_stop_risk']:
+            custom_logger.warning(f"Early stopping risk: {tokens['content']} < {quality['expected_ranges']['minimum']} expected")
+        
+        if quality['truncation_risk']:
+            custom_logger.warning(f"Truncation risk: {tokens['content']} near max limit {tokens['max_allowed']}")
+        
+        if quality['recommendations']:
+            custom_logger.info(f"   💡 Recommendations:")
+            for rec in quality['recommendations'][:3]:
+                custom_logger.info(f"      • {rec}")
+
+
+def debug_whisper_generation(
+    processor, 
+    model, 
+    pred_ids: torch.Tensor, 
+    audio_duration: float,
+    max_tokens: int
+) -> Dict[str, Any]:
+    """
+    Main function to debug Whisper generation.
+    
+    Usage in whisper_transcriber.py:
+        from whisper_generation_debug import debug_whisper_generation
+        
+        # After model.generate()
+        debug_result = debug_whisper_generation(
+            self.processor, self.model, pred_ids, duration, dynamic_max_tokens
+        )
+    """
+    debugger = WhisperGenerationDebugger(processor, model)
+    return debugger.analyze_generation(pred_ids, audio_duration, max_tokens)

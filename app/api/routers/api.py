@@ -1,13 +1,12 @@
 """API routes"""
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter
 
-from app.api.routers import voice_router
+from app.api.routers import upload_router
 
 app = APIRouter()
 
 app.include_router(
-    voice_router.router,
+    upload_router.router,
     tags=["Voice Identification"],
     prefix="/v1",
 )

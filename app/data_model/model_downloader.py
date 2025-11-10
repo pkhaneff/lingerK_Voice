@@ -14,15 +14,12 @@ class ModelDownloader:
                        expected_hash: Optional[str] = None) -> bool:
         """Download model từ URL về local storage"""
         try:
-            # Download logic
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Verify checksum
             if expected_hash and not cls._verify_checksum(dest_path, expected_hash):
                 logger.error(f"Checksum mismatch for {dest_path}")
                 return False
             
-            # Save checksum
             cls._save_checksum(dest_path, expected_hash)
             
             logger.info(f"Model downloaded: {dest_path}")

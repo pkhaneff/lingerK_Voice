@@ -35,16 +35,14 @@ class OSDAnalyzer:
     async def analyze_overlap(
         self,
         cleaned_audio_path: str,
-        vad_timeline: List[Tuple[float, float]],
         total_audio_duration: float
     ) -> Dict[str, Any]:
         """
         Main entry point.
         
         Args:
-            cleaned_audio_path: Path to cleaned audio
-            vad_timeline: List of (start, end) from VAD
-            total_audio_duration: Total duration
+            cleaned_audio_path: Path to cleaned audio (100% voice content)
+            total_audio_duration: Duration of cleaned audio
             
         Returns:
             {
@@ -66,7 +64,6 @@ class OSDAnalyzer:
             if not Path(cleaned_audio_path).exists():
                 return {'success': False, 'data': None, 'error': f'File not found'}
             
-            # Step 1: Run OSD
             osd_output = await self.osd_model.predict(cleaned_audio_path)
             
             if not osd_output:
@@ -75,7 +72,6 @@ class OSDAnalyzer:
             overlap_timeline = osd_output['timeline']
             raw_output = osd_output.get('raw_output')
             
-            # Extract overlap segments with confidence
             overlap_segments = self._extract_overlap_segments(
                 overlap_timeline,
                 raw_output
@@ -83,26 +79,21 @@ class OSDAnalyzer:
             
             custom_logger.info(f"OSD found {len(overlap_segments)} overlap segments")
             
-            # Step 2: Check criteria
             decision = self._check_criteria(
                 overlap_segments,
-                vad_timeline,
-                total_audio_duration
+                total_audio_duration 
             )
             
             track_type = decision['track_type']
             custom_logger.info(f"Decision: {track_type}")
             
-            # Step 3: Create tracks
             if track_type == 'single':
                 tracks_result = self._create_single_track(
-                    vad_timeline,
                     total_audio_duration
                 )
-            else:  # multi
+            else:  
                 tracks_result = await self._create_multi_tracks(
                     cleaned_audio_path,
-                    vad_timeline,
                     decision['significant_overlaps'],
                     total_audio_duration
                 )
@@ -110,7 +101,6 @@ class OSDAnalyzer:
             if not tracks_result['success']:
                 return tracks_result
             
-            # Step 4: Statistics
             tracks = tracks_result['data']['tracks']
             statistics = self._calculate_statistics(
                 tracks,
@@ -145,7 +135,6 @@ class OSDAnalyzer:
             end_time = float(segment.end)
             duration = end_time - start_time
             
-            # Calculate confidence
             confidence = self._calculate_confidence(
                 raw_output.get('scores') if isinstance(raw_output, dict) else None,
                 start_time,
@@ -191,7 +180,6 @@ class OSDAnalyzer:
             else:
                 confidence = float(np.mean(segment_scores))
             
-            # Clamp giÃ¡ trá»‹
             confidence = max(0.0, min(1.0, confidence))
             
             return confidence
@@ -203,46 +191,32 @@ class OSDAnalyzer:
     def _check_criteria(
         self,
         overlap_segments: List[Dict],
-        vad_timeline: List[Tuple[float, float]],
-        total_duration: float
+        cleaned_audio_duration: float
     ) -> Dict[str, Any]:
-        """
-        Check criteria for single vs multi.
-        
-        Criteria:
-        1. CÃ³ Ã­t nháº¥t 1 vÃ¹ng overlap >= 5s
-        2. HOáº¶C tá»•ng overlap >= 5% thá»i lÆ°á»£ng voice
-        3. VÃ€ sá»‘ vÃ¹ng overlap Ä‘Ã¡ng ká»ƒ >= 2
-        4. Merge cÃ¡c vÃ¹ng overlap cÃ¡ch nhau < 2s
-        """
         if not overlap_segments:
             return {
                 'track_type': 'single',
                 'significant_overlaps': []
             }
         
-        # Calculate total voice duration
-        total_voice_duration = sum(end - start for start, end in vad_timeline)
+        total_voice_duration = cleaned_audio_duration
         
-        # Merge close overlaps
         merged_overlaps = self._merge_overlaps(overlap_segments, gap_threshold=2.0)
         
-        # Find significant overlaps (>= 5s)
         significant = [
             seg for seg in merged_overlaps
             if seg['duration'] >= 5.0
         ]
         
-        # Calculate total overlap duration
         total_overlap_duration = sum(seg['duration'] for seg in merged_overlaps)
         overlap_ratio = total_overlap_duration / total_voice_duration if total_voice_duration > 0 else 0
         
-        # Check criteria
         has_long_overlap = len(significant) > 0
         has_high_ratio = overlap_ratio >= 0.05
         has_multiple_regions = len(significant) >= 2
         
-        custom_logger.info(f"Overlap criteria:")
+        custom_logger.info(f"Overlap criteria (cleaned audio logic):")
+        custom_logger.info(f"  - Voice duration: {total_voice_duration:.2f}s (100% of cleaned)")
         custom_logger.info(f"  - Long overlaps (>=5s): {len(significant)}")
         custom_logger.info(f"  - Overlap ratio: {overlap_ratio:.1%}")
         custom_logger.info(f"  - Multiple regions: {has_multiple_regions}")
@@ -263,7 +237,7 @@ class OSDAnalyzer:
         overlaps: List[Dict],
         gap_threshold: float
     ) -> List[Dict]:
-        """Merge overlaps cÃ¡ch nhau < threshold."""
+        """Merge overlaps cÃƒÂ¡ch nhau < threshold."""
         if not overlaps:
             return []
         
@@ -281,7 +255,6 @@ class OSDAnalyzer:
                 current['duration'] = current['end_time'] - current['start_time']
                 current['confidence'] = max(current['confidence'], overlap['confidence'])
             else:
-                # Save and start new
                 merged.append(current)
                 current = overlap.copy()
         
@@ -290,40 +263,25 @@ class OSDAnalyzer:
     
     def _create_single_track(
         self,
-        vad_timeline: List[Tuple[float, float]],
-        total_duration: float
+        cleaned_audio_duration: float
     ) -> Dict[str, Any]:
-        """Create 1 single track covering all voice activity."""
+        """Create 1 single track covering entire cleaned audio."""
         try:
-            if not vad_timeline:
-                return {'success': False, 'data': None, 'error': 'No voice activity'}
+            if cleaned_audio_duration <= 0:
+                return {'success': False, 'data': None, 'error': 'Invalid audio duration'}
             
-            # ===== LOG VAD TIMELINE =====
-            custom_logger.info(f"🔍 VAD Timeline has {len(vad_timeline)} segments:")
-            for i, (start, end) in enumerate(vad_timeline[:5]):  # Log first 5
-                custom_logger.info(f"   Segment {i+1}: {start:.2f}s → {end:.2f}s (duration: {end-start:.2f}s)")
-            if len(vad_timeline) > 5:
-                custom_logger.info(f"   ... and {len(vad_timeline)-5} more segments")
-            
-            total_vad_duration = sum(end - start for start, end in vad_timeline)
-            custom_logger.info(f"📊 Total VAD duration: {total_vad_duration:.2f}s / {total_duration:.2f}s")
-            # ===========================
-            
-            # Find min start and max end
-            start_time = min(start for start, _ in vad_timeline)
-            end_time = max(end for _, end in vad_timeline)
-            duration = end_time - start_time
-            coverage = (duration / total_duration) * 100 if total_duration > 0 else 0
-            
-            # ===== LOG SINGLE SEGMENT =====
-            silence_duration = duration - total_vad_duration
-            custom_logger.warning(
-                f"⚠️  Creating SINGLE segment: {start_time:.2f}s → {end_time:.2f}s\n"
-                f"    Total: {duration:.2f}s | Voice: {total_vad_duration:.2f}s | Silence: {silence_duration:.2f}s"
+            custom_logger.info(f"Creating single track for cleaned audio:")
+            custom_logger.info(f"Duration: {cleaned_audio_duration:.2f}s (100% voice content)")
+            start_time = 0.0
+            end_time = cleaned_audio_duration
+            duration = cleaned_audio_duration
+            coverage = 100.0 
+
+            custom_logger.info(
+                f"Creating SINGLE segment: {start_time:.2f}s → {end_time:.2f}s\n"
+                f"Total: {duration:.2f}s | Voice: {duration:.2f}s | Silence: 0.0s"
             )
-            # ============================
             
-            # Create single segment (entire track is non-overlap)
             segments = [{
                 'segment_type': 'non-overlap',
                 'start_time': float(start_time),
@@ -339,7 +297,7 @@ class OSDAnalyzer:
                 'ranges': [(start_time, end_time)],
                 'total_duration': float(duration),
                 'coverage': float(coverage),
-                'segments': segments  # NEW: segment detail
+                'segments': segments
             }]
             
             custom_logger.info(f"Created single track: {duration:.1f}s ({coverage:.1f}%)")
@@ -357,7 +315,6 @@ class OSDAnalyzer:
     async def _create_multi_tracks(
         self,
         audio_path: str,
-        vad_timeline: List[Tuple[float, float]],
         significant_overlaps: List[Dict],
         total_duration: float
     ) -> Dict[str, Any]:
@@ -365,7 +322,6 @@ class OSDAnalyzer:
         try:
             custom_logger.info("Creating multi tracks...")
             
-            # Step 1: Ensure separator loaded
             if not self.separator:
                 from app.data_model.model_config import MODEL_CONFIGS
         
@@ -378,7 +334,6 @@ class OSDAnalyzer:
                 if not await self.separator.load_model():
                     return {'success': False, 'data': None, 'error': 'Separator not loaded'}
             
-            # Step 2: Separate overlap regions
             sep_result = await self.separator.separate_overlap_regions(
                 audio_path,
                 significant_overlaps,
@@ -390,10 +345,11 @@ class OSDAnalyzer:
             
             separated_regions = sep_result['data']['separated_regions']
             
-            # Step 3: Assign speakers and stitch tracks
+            cleaned_vad_timeline = [(0.0, total_duration)]
+            
             tracks_result = self.assigner.create_tracks(
                 audio_path,
-                vad_timeline,
+                cleaned_vad_timeline,
                 separated_regions,
                 total_duration,
                 sr=16000
@@ -404,7 +360,6 @@ class OSDAnalyzer:
             
             tracks = tracks_result['data']['tracks']
             
-            # Add track type
             for track in tracks:
                 track['type'] = 'separated'
             

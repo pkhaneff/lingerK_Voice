@@ -12,7 +12,6 @@ class BaseModel(ABC):
         self.downloader = ModelDownloader()
     
     async def ensure_model_downloaded(self) -> bool:
-        """Đảm bảo model đã được download"""
         model_path = self.config['cache_dir'] / self.config['model_file']
         
         if not self.downloader.model_exists(model_path):
@@ -24,5 +23,4 @@ class BaseModel(ABC):
     
     @abstractmethod
     async def _download_model(self, dest_path: Path) -> bool:
-        """Implement download logic for specific model"""
         pass

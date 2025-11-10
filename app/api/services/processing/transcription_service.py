@@ -33,15 +33,41 @@ class TranscriptionService:
         try:
             custom_logger.info(f"Starting transcription for {len(speaker_tracks)} tracks")
             
-            # Step 1: Ensure transcriber loaded
             if not self._transcriber_loaded:
                 custom_logger.info("Loading Whisper model...")
                 if not await self.transcriber.load_model():
                     return {'success': False, 'data': None, 'error': 'Whisper model load failed'}
                 self._transcriber_loaded = True
             
-            # Step 2: Generate track audio files
-            custom_logger.info("Generating track audio files...")
+            if (len(speaker_tracks) == 1 and 
+                len(speaker_tracks[0].get('segments', [])) == 1 and
+                not separated_regions):
+                
+                custom_logger.info("Single speaker detected - using direct transcription (bypass track generation)")
+                track = speaker_tracks[0]
+                speaker_id = track['speaker_id']
+                
+                result = await self.transcriber.transcribe_track(cleaned_audio_path, language='vi')
+                
+                if not result['success']:
+                    custom_logger.error(f"Direct transcription failed: {result['error']}")
+                    return {'success': False, 'data': None, 'error': result['error']}
+                
+                track['transcript'] = result['data']['text']
+                track['words'] = result['data']['words']
+                
+                custom_logger.info(
+                    f"Speaker {speaker_id}: {len(result['data']['words'])} words, "
+                    f"text length: {len(result['data']['text'])} chars (direct transcription)"
+                )
+                
+                return {
+                    'success': True,
+                    'data': {'tracks': [track]},
+                    'error': None
+                }
+            
+            custom_logger.info("🔄 Multi-speaker/complex case - using track audio generation")
             track_paths = self.generator.generate_tracks(
                 cleaned_audio_path,
                 speaker_tracks,
@@ -50,7 +76,6 @@ class TranscriptionService:
             
             custom_logger.info(f"Generated {len(track_paths)} track files")
             
-            # Step 3: Transcribe each track
             transcribed_tracks = []
             
             for track in speaker_tracks:
@@ -61,7 +86,6 @@ class TranscriptionService:
                     custom_logger.warning(f"No audio file for speaker {speaker_id}")
                     continue
                 
-                # ===== LOG AUDIO FILE STATS =====
                 import librosa
                 try:
                     audio_data, sr = librosa.load(audio_path, sr=16000, mono=True)
@@ -70,14 +94,13 @@ class TranscriptionService:
                     voice_duration = non_zero / sr
                     silence_duration = duration - voice_duration
                     
-                    custom_logger.info(f"\n🎤 Transcribing Speaker {speaker_id}:")
+                    custom_logger.info(f"\nðŸŽ¤ Transcribing Speaker {speaker_id}:")
                     custom_logger.info(f"   Audio file: {audio_path}")
                     custom_logger.info(f"   Total duration: {duration:.2f}s")
                     custom_logger.info(f"   Voice: {voice_duration:.2f}s ({voice_duration/duration*100:.1f}%)")
                     custom_logger.info(f"   Silence: {silence_duration:.2f}s ({silence_duration/duration*100:.1f}%)")
                 except Exception as e:
                     custom_logger.warning(f"Could not analyze audio: {e}")
-                # ================================
                 
                 result = await self.transcriber.transcribe_track(audio_path, language='vi')
                 
@@ -85,18 +108,16 @@ class TranscriptionService:
                     custom_logger.error(f"Transcription failed for speaker {speaker_id}: {result['error']}")
                     continue
                 
-                # Add transcription to track
                 track['transcript'] = result['data']['text']
                 track['words'] = result['data']['words']
                 
                 custom_logger.info(
-                    f"âœ… Speaker {speaker_id}: {len(result['data']['words'])} words, "
+                    f"Ã¢Å“â€¦ Speaker {speaker_id}: {len(result['data']['words'])} words, "
                     f"text length: {len(result['data']['text'])} chars"
                 )
                 
                 transcribed_tracks.append(track)
             
-            # Step 4: Cleanup temp files
             custom_logger.info("Cleaning up temp files...")
             self.generator.cleanup(track_paths)
             
@@ -107,7 +128,7 @@ class TranscriptionService:
                     'error': 'No tracks were successfully transcribed'
                 }
             
-            custom_logger.info(f"âœ… Transcription completed for {len(transcribed_tracks)} tracks")
+            custom_logger.info(f"Ã¢Å“â€¦ Transcription completed for {len(transcribed_tracks)} tracks")
             
             return {
                 'success': True,
@@ -118,7 +139,6 @@ class TranscriptionService:
         except Exception as e:
             custom_logger.error(f"Transcription service failed: {e}", exc_info=True)
             
-            # Cleanup on error
             if track_paths:
                 try:
                     self.generator.cleanup(track_paths)
