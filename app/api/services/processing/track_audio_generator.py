@@ -20,42 +20,32 @@ class TrackAudioGenerator:
         separated_regions: List[Dict],
         sr: int = 16000
     ) -> Dict[int, str]:
-        """
-        Táº¡o audio file hoÃ n chá»‰nh cho tá»«ng speaker.
-        
-        Args:
-            cleaned_audio_path: Path to cleaned audio
-            speaker_tracks: List of speaker tracks with segments
-            separated_regions: Output from Conv-TasNet separation
-            sr: Sample rate
-            
-        Returns:
-            {speaker_id: temp_file_path}
-        """
         try:
             custom_logger.info(f"Generating track audio files from: {cleaned_audio_path}")
             
-            # Load audio gá»‘c
+            custom_logger.info(f"TrackAudioGenerator received {len(speaker_tracks)} tracks")
+            for i, track in enumerate(speaker_tracks):
+                custom_logger.info(f"Input Track {i}: speaker_id={track.get('speaker_id')}, segments={len(track.get('segments', []))}")
+                if track.get('segments'):
+                    for j, seg in enumerate(track['segments'][:2]): 
+                        custom_logger.debug(f"Segment {j+1}: {seg.get('segment_type')} {seg.get('start_time'):.2f}s-{seg.get('end_time'):.2f}s")
+            
             audio_data, loaded_sr = librosa.load(cleaned_audio_path, sr=sr, mono=True)
             custom_logger.info(f"Loaded audio: {len(audio_data)} samples, sr={loaded_sr}Hz")
             
-            # Táº¡o tracks rá»—ng cho má»—i speaker
             track_audios = {}
             for track in speaker_tracks:
                 speaker_id = track['speaker_id']
                 track_audios[speaker_id] = np.zeros_like(audio_data)
             
-            # Fill audio cho tá»«ng track
             for track in speaker_tracks:
                 speaker_id = track['speaker_id']
                 
-                # ===== LOG TRACK INFO =====
                 custom_logger.info(f"\n{'='*50}")
-                custom_logger.info(f"🎵 Processing Speaker {speaker_id} Track:")
-                custom_logger.info(f"   Type: {track.get('type', 'unknown')}")
-                custom_logger.info(f"   Total duration: {track.get('total_duration', 0):.2f}s")
-                custom_logger.info(f"   Segments count: {len(track['segments'])}")
-                # =========================
+                custom_logger.info(f"Processing Speaker {speaker_id} Track:")
+                custom_logger.info(f"Type: {track.get('type', 'unknown')}")
+                custom_logger.info(f"Total duration: {track.get('total_duration', 0):.2f}s")
+                custom_logger.info(f"Segments count: {len(track['segments'])}")
                 
                 total_voice_samples = 0
                 
@@ -63,7 +53,6 @@ class TrackAudioGenerator:
                     start_sample = int(segment['start_time'] * sr)
                     end_sample = int(segment['end_time'] * sr)
                     
-                    # Clamp indices
                     start_sample = max(0, start_sample)
                     end_sample = min(len(audio_data), end_sample)
                     
@@ -74,21 +63,17 @@ class TrackAudioGenerator:
                     segment_samples = end_sample - start_sample
                     total_voice_samples += segment_samples
                     
-                    # ===== LOG SEGMENT FILL =====
-                    if seg_idx < 3:  # Log first 3 segments
+                    if seg_idx < 3:
                         custom_logger.info(
-                            f"   Filling segment {seg_idx+1}: {segment['start_time']:.2f}s → {segment['end_time']:.2f}s "
+                            f"   Filling segment {seg_idx+1}: {segment['start_time']:.2f}s â†’ {segment['end_time']:.2f}s "
                             f"({segment['segment_type']}, {segment_samples} samples)"
                         )
-                    # ==========================
                     
                     if segment['segment_type'] == 'non-overlap':
-                        # Copy tá»« audio gá»‘c
                         track_audios[speaker_id][start_sample:end_sample] = \
                             audio_data[start_sample:end_sample]
                         
-                    else:  # overlap
-                        # Copy tá»« separated source
+                    else: 
                         sep_audio = self._get_separated_audio(
                             separated_regions,
                             speaker_id,
@@ -97,7 +82,6 @@ class TrackAudioGenerator:
                         )
                         
                         if sep_audio is not None:
-                            # Ensure same length
                             expected_len = end_sample - start_sample
                             if len(sep_audio) != expected_len:
                                 if len(sep_audio) > expected_len:
@@ -111,30 +95,25 @@ class TrackAudioGenerator:
                             
                             track_audios[speaker_id][start_sample:end_sample] = sep_audio
                 
-                # ===== LOG TRACK AUDIO STATS =====
                 track_audio = track_audios[speaker_id]
                 total_samples = len(track_audio)
-                non_zero_samples = np.count_nonzero(np.abs(track_audio) > 0.001)
+                non_zero_samples = np.count_nonzero(np.abs(track_audio) > 0.0001)
                 zero_samples = total_samples - non_zero_samples
-                
+                # zero_samples = 0.0
                 total_duration = total_samples / sr
                 voice_duration = non_zero_samples / sr
                 silence_duration = zero_samples / sr
                 
-                custom_logger.info(f"\n📊 Track Audio Stats for Speaker {speaker_id}:")
+                custom_logger.info(f"\nTrack Audio Stats for Speaker {speaker_id}:")
                 custom_logger.info(f"   Total: {total_duration:.2f}s ({total_samples} samples)")
                 custom_logger.info(f"   Voice: {voice_duration:.2f}s ({non_zero_samples} samples, {non_zero_samples/total_samples*100:.1f}%)")
                 custom_logger.info(f"   Silence: {silence_duration:.2f}s ({zero_samples} samples, {zero_samples/total_samples*100:.1f}%)")
                 custom_logger.info(f"{'='*50}\n")
-                # =================================
             
-            # LÆ°u temp files
             output_paths = {}
             for speaker_id, audio in track_audios.items():
-                # Remove silence (optional, giá»¯ audio clean hÆ¡n)
-                audio = self._remove_leading_trailing_silence(audio)
+                audio = self._remove_all_silence(audio)
                 
-                # Create temp file
                 temp_file = tempfile.NamedTemporaryFile(
                     suffix=f'_speaker_{speaker_id}.wav',
                     delete=False
@@ -142,7 +121,6 @@ class TrackAudioGenerator:
                 temp_path = temp_file.name
                 temp_file.close()
                 
-                # Write audio
                 sf.write(temp_path, audio, sr)
                 output_paths[speaker_id] = temp_path
                 self.temp_files.append(temp_path)
@@ -170,7 +148,6 @@ class TrackAudioGenerator:
             
             # Check overlap
             if not (end_time <= region_start or start_time >= region_end):
-                # Found matching region
                 source_key = f'source_{speaker_id}'
                 
                 if source_key not in region:
@@ -179,18 +156,15 @@ class TrackAudioGenerator:
                 
                 sep_audio = region[source_key]
                 
-                # Extract exact time range
                 sr = 16000
                 region_duration = region_end - region_start
                 
-                # Calculate relative positions
                 rel_start = max(0, start_time - region_start)
                 rel_end = min(region_duration, end_time - region_start)
                 
                 start_sample = int(rel_start * sr)
                 end_sample = int(rel_end * sr)
                 
-                # Clamp
                 start_sample = max(0, start_sample)
                 end_sample = min(len(sep_audio), end_sample)
                 
@@ -198,6 +172,25 @@ class TrackAudioGenerator:
         
         custom_logger.warning(f"No separated region found for {start_time}-{end_time}")
         return None
+    
+    def _remove_all_silence(
+        self,
+        audio: np.ndarray,
+        threshold: float = 0.0001
+    ) -> np.ndarray:
+        """
+        Remove ALL silence segments, not just leading/trailing.
+        This prevents Whisper early stopping on silence gaps.
+        """
+        if len(audio) == 0:
+            return audio
+        
+        non_silent_indices = np.where(np.abs(audio) > threshold)[0]
+        
+        if len(non_silent_indices) == 0:
+            return audio[:160]
+        
+        return audio[non_silent_indices]
     
     def _remove_leading_trailing_silence(
         self,
@@ -208,7 +201,6 @@ class TrackAudioGenerator:
         if len(audio) == 0:
             return audio
         
-        # Find first non-silent sample
         non_silent = np.where(np.abs(audio) > threshold)[0]
         
         if len(non_silent) == 0:

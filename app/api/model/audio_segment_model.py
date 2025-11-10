@@ -13,23 +13,19 @@ class AudioSegment(Base):
                         sa.ForeignKey("audio_ingest.audio_id", ondelete="CASCADE"),
                         nullable=False)
     
-    # Track information
-    track_type = sa.Column(sa.String(20), nullable=False)  # 'single' or 'overlap'
-    track_order = sa.Column(sa.Integer, nullable=False)    # Order by time
+    track_type = sa.Column(sa.String(20), nullable=False)  
+    track_order = sa.Column(sa.Integer, nullable=False)    
     
-    # Time information
     start_time = sa.Column(sa.Float, nullable=False)
     end_time = sa.Column(sa.Float, nullable=False)
     duration = sa.Column(sa.Float, nullable=False)
     
-    # Metrics
-    coverage = sa.Column(sa.Float, nullable=True)          # Percentage of total duration
-    osd_confidence = sa.Column(sa.Float, nullable=True)    # OSD confidence score
+    coverage = sa.Column(sa.Float, nullable=True)          
+    osd_confidence = sa.Column(sa.Float, nullable=True)    
     
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False,
                           server_default=sa.text("NOW()"))
     
-    # Relationship
     audio = relationship("AudioIngest", back_populates="segments", lazy="select")
 
     __table_args__ = (

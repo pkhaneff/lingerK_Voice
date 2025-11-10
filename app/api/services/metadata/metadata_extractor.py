@@ -31,18 +31,15 @@ class MetadataExtractor:
         try:
             custom_logger.info(f"Extracting metadata from: {audio_s3_key}")
             
-            # Create temp file
             with tempfile.NamedTemporaryFile(suffix='.tmp', delete=False) as f:
                 temp_file_path = f.name
             
-            # Download audio
             audio_object = get_object(audio_s3_key, self.bucket_name)
             with open(temp_file_path, 'wb') as f:
                 f.write(audio_object.body.read())
             
             custom_logger.debug(f"Audio downloaded to: {temp_file_path}")
             
-            # Extract metadata
             loop = asyncio.get_event_loop()
             metadata = await loop.run_in_executor(
                 None,
@@ -72,14 +69,12 @@ class MetadataExtractor:
             audio_clip = AudioFileClip(file_path)
             duration = audio_clip.duration
             
-            # Detect codec from extension
             file_ext = Path(file_path).suffix.lower()
             codec_map = {
                 '.mp3': 'mp3',
                 '.m4a': 'aac',
                 '.ogg': 'ogg',
                 '.wav': 'pcm',
-                '.aac': 'aac'
             }
             codec = codec_map.get(file_ext, 'unknown')
             

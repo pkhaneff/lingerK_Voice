@@ -23,7 +23,7 @@ class OSDModel(BaseModel):
             hf_token = self.config.get('hf_token')
             if hf_token:
                 login(token=hf_token, add_to_git_credential=False)
-                custom_logger.info("✅ Logged in to HuggingFace for OSD")
+                custom_logger.info(" Logged in to HuggingFace for OSD")
             else:
                 custom_logger.warning("No HF token provided for OSD")
             return True
@@ -44,7 +44,7 @@ class OSDModel(BaseModel):
             if hf_token:
                 try:
                     login(token=hf_token, add_to_git_credential=False)
-                    custom_logger.info("✅ HuggingFace authentication success for OSD")
+                    custom_logger.info(" HuggingFace authentication success for OSD")
                 except Exception as e:
                     custom_logger.warning(f"HF login warning: {e}")
             
@@ -62,7 +62,7 @@ class OSDModel(BaseModel):
             device = self.config.get('device', 'cpu')
             try:
                 self.model.to(device)
-                custom_logger.info(f"✅ OSD model loaded on device: {device}")
+                custom_logger.info(f" OSD model loaded on device: {device}")
             except Exception as e:
                 custom_logger.warning(f"Could not move to {device}: {e}, using CPU")
                 self.model.to('cpu')
@@ -83,12 +83,9 @@ class OSDModel(BaseModel):
         
         try:
             custom_logger.info(f"Running OSD on: {audio_path}")
-            from pyannote.audio import Inference
             
-            # Run OSD with scores
             osd_output = self.model(audio_path)
             
-            # Extract both timeline and scores
             if hasattr(osd_output, 'get_timeline'):
                 overlap_timeline = osd_output.get_timeline().support()
             else:
@@ -104,9 +101,8 @@ class OSDModel(BaseModel):
             except Exception as e:
                 custom_logger.warning(f"Cannot extract scores: {e}")
                 scores = None
-            custom_logger.info(f"✅ OSD completed: {len(overlap_timeline)} overlap segments")
+            custom_logger.info(f" OSD completed: {len(overlap_timeline)} overlap segments")
             
-            # Return both timeline and raw output for confidence extraction
             return {
                 'timeline': overlap_timeline,
                 'scores': scores 

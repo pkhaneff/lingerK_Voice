@@ -32,48 +32,18 @@ class SpeakerAssigner:
         sr: int = 16000
     ) -> Dict[str, Any]:
         """
-        Tạo N tracks ổn định từ VAD và separated regions.
-        
         Args:
             audio_path: Path to cleaned audio
             vad_timeline: List of (start, end) tuples from VAD
             separated_regions: Output from separation
             total_duration: Total audio duration
             sr: Sample rate
-            
-        Returns:
-            {
-                'success': bool,
-                'data': {
-                    'tracks': [
-                        {
-                            'speaker_id': int,
-                            'ranges': [(start, end), ...],
-                            'total_duration': float,
-                            'coverage': float,
-                            'segments': [  # NEW: detailed segments
-                                {
-                                    'segment_type': 'overlap' or 'non-overlap',
-                                    'start_time': float,
-                                    'end_time': float,
-                                    'duration': float,
-                                    'confidence': float,
-                                    'separation_method': str or None
-                                }
-                            ]
-                        }
-                    ]
-                },
-                'error': str
-            }
         """
         try:
             custom_logger.info("Creating speaker tracks...")
             
-            # Load full audio
             audio_data, _ = librosa.load(audio_path, sr=sr, mono=True)
             
-            # Step 1: Identify overlap and non-overlap regions
             overlap_regions = [
                 (r['start_time'], r['end_time']) 
                 for r in separated_regions
@@ -87,7 +57,6 @@ class SpeakerAssigner:
             custom_logger.info(f"Non-overlap regions: {len(non_overlap_regions)}")
             custom_logger.info(f"Overlap regions: {len(overlap_regions)}")
             
-            # Step 2: Assign non-overlap regions to speakers
             speaker_assignments = self._assign_non_overlap(
                 audio_data,
                 non_overlap_regions,
@@ -95,10 +64,8 @@ class SpeakerAssigner:
                 sr
             )
             
-            # Step 3: Build raw tracks (speaker_id -> list of ranges)
             raw_tracks = {0: [], 1: []}
             
-            # Add non-overlap regions
             for region, speaker_id in zip(non_overlap_regions, speaker_assignments):
                 start, end = region
                 segment = {
@@ -107,11 +74,10 @@ class SpeakerAssigner:
                     'end_time': float(end),
                     'duration': float(end - start),
                     'confidence': 0.95,
-                    'separation_method': None  # ✅ Non-overlap không cần separation
+                    'separation_method': None 
                 }
                 raw_tracks[speaker_id].append(segment)
             
-            # Add separated overlap regions
             for sep_region in separated_regions:
                 start = sep_region['start_time']
                 end = sep_region['end_time']
@@ -137,14 +103,12 @@ class SpeakerAssigner:
                 }
                 raw_tracks[1].append(segment_b)
             
-            # Step 4: Stitch tracks
             stitched_tracks = []
             
             for speaker_id, segment in raw_tracks.items():
                 if not segment:
                     continue
                 
-                # Sort and merge
                 sorted_segment = sorted(segment, key=lambda x: x['start_time'])
                 ranges = [(s['start_time'], s['end_time']) for s in sorted_segment]
                 merged_ranges = self._merge_ranges(
@@ -156,16 +120,13 @@ class SpeakerAssigner:
                     merged_ranges
                 )
                 
-                # Filter by min_range_len
                 filtered_segments = [
                     s for s in merged_segments
                     if s['duration'] >= self.min_range_len
                 ]
                 
-                # Calculate total duration
                 total_dur = sum(s['duration'] for s in filtered_segments)
                 
-                # Filter by min_track_total
                 if total_dur < self.min_track_total:
                     custom_logger.info(
                         f"Speaker {speaker_id} filtered out: "
@@ -285,16 +246,13 @@ class SpeakerAssigner:
             end_sample = int(region_end * sr)
             region_audio = audio_data[start_sample:end_sample]
             
-            # Extract embedding
             region_embedding = self._extract_embedding(region_audio, sr)
             
-            # Compare with references
             similarities = [
                 self._cosine_similarity(region_embedding, ref_emb)
                 for ref_emb in ref_embeddings
             ]
             
-            # Assign to most similar speaker
             speaker_id = int(np.argmax(similarities))
             assignments.append(speaker_id)
         
@@ -313,7 +271,6 @@ class SpeakerAssigner:
             source_0_chunks.append(region['source_0'])
             source_1_chunks.append(region['source_1'])
         
-        # Concatenate and extract embeddings
         source_0_concat = np.concatenate(source_0_chunks)
         source_1_concat = np.concatenate(source_1_chunks)
         
@@ -330,7 +287,6 @@ class SpeakerAssigner:
         mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=20)
         embedding = np.mean(mfcc, axis=1)
         
-        # Normalize
         norm = np.linalg.norm(embedding)
         if norm > 0:
             embedding = embedding / norm
@@ -364,14 +320,11 @@ class SpeakerAssigner:
             gap = start - current_end
             
             if gap <= gap_threshold:
-                # Merge
                 current_end = max(current_end, end)
             else:
-                # Save current and start new
                 merged.append((current_start, current_end))
                 current_start, current_end = start, end
         
-        # Add last range
         merged.append((current_start, current_end))
         
         return merged

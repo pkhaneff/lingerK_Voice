@@ -2,6 +2,7 @@ import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from loguru import logger as custom_logger
+from sqlalchemy import update
 
 from app.api.db.session import AsyncSessionLocal
 from app.api.model.audio_model import AudioIngest
@@ -9,7 +10,7 @@ from app.api.model.video_model import VideoIngest
 from app.api.model.audio_segment_model import AudioSegment
 from app.api.model.speaker_track_model import SpeakerTrack
 from app.api.model.track_segment_model import TrackSegment
-
+from app.api.model.audio_clean import AudioClean
 
 class DBSaver:
     """Save and update metadata in database."""
@@ -113,6 +114,52 @@ class DBSaver:
             custom_logger.error(f"Failed to save video: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
     
+    async def save_audio_clean(
+        self,
+        original_audio_id: str,
+        storage_uri: str,
+        processing_method: str = 'pyrnnoise'
+    ) -> Dict[str, Any]:
+        """
+        Save cleaned audio metadata.
+        
+        Args:
+            original_audio_id: Original audio ID (foreign key)
+            storage_uri: S3 URI of cleaned audio
+            processing_method: Method used for cleaning
+            
+        Returns:
+            {'success': bool, 'data': {'cleaned_audio_id'}, 'error': str}
+        """
+        try:
+            custom_logger.info(f"Saving cleaned audio: original_id={original_audio_id}")
+            
+            audio_clean_record = AudioClean(
+                cleaned_audio_id=uuid.uuid4(),
+                original_audio_id=uuid.UUID(original_audio_id),
+                storage_uri=storage_uri,
+                processing_method=processing_method,
+                created_at=datetime.utcnow()
+            )
+            
+            async with AsyncSessionLocal() as session:
+                session.add(audio_clean_record)
+                await session.commit()
+                await session.refresh(audio_clean_record)
+                
+                cleaned_audio_id = str(audio_clean_record.cleaned_audio_id)
+                custom_logger.info(f"Audio clean saved: cleaned_audio_id={cleaned_audio_id}")
+                
+                return {
+                    'success': True,
+                    'data': {'cleaned_audio_id': cleaned_audio_id},
+                    'error': None
+                }
+        
+        except Exception as e:
+            custom_logger.error(f"Failed to save audio clean: {str(e)}", exc_info=True)
+            return {'success': False, 'data': None, 'error': str(e)}
+    
     async def save_hybrid_tracks(
         self,
         audio_id: str,
@@ -126,12 +173,17 @@ class DBSaver:
         try:
             custom_logger.info(f"Saving {len(tracks)} hybrid tracks for audio_id={audio_id}")
             
+            for i, track in enumerate(tracks):
+                custom_logger.info(f"Track {i} input: speaker_id={track.get('speaker_id')}, segments={len(track.get('segments', []))}")
+                if track.get('segments'):
+                    for j, seg in enumerate(track['segments'][:2]):  
+                        custom_logger.debug(f"   Segment {j+1}: {seg.get('segment_type')} {seg.get('start_time'):.2f}s-{seg.get('end_time'):.2f}s")
+            
             audio_uuid = uuid.UUID(audio_id)
             track_records = []
             segment_records = []
             
             for track in tracks:
-                # Create SpeakerTrack record (parent)
                 track_id = uuid.uuid4()
                 
                 speaker_track = SpeakerTrack(
@@ -142,13 +194,12 @@ class DBSaver:
                     ranges=track['ranges'],
                     total_duration=track['total_duration'],
                     coverage=track['coverage'],
-                    transcript=track.get('transcript'),      # NEW: Add transcript
-                    words=track.get('words'),                # NEW: Add words
+                    transcript=track.get('transcript'),      
+                    words=track.get('words'),                
                     created_at=datetime.utcnow()
                 )
                 track_records.append(speaker_track)
                 
-                # Create TrackSegment records for this track (children)
                 segments = track.get('segments', [])
                 custom_logger.debug(f"Track {track['speaker_id']} has {len(segments)} segments")
                 
@@ -166,20 +217,16 @@ class DBSaver:
                     )
                     segment_records.append(track_segment)
             
-            # Save to database
             async with AsyncSessionLocal() as session:
-                # Insert tracks first (parent records)
                 session.add_all(track_records)
                 await session.flush()
                 
-                # Insert segments (children records)
                 session.add_all(segment_records)
                 
-                # Commit transaction
                 await session.commit()
                 
                 custom_logger.info(
-                    f"✅ Saved {len(track_records)} tracks "
+                    f"Saved {len(track_records)} tracks "
                     f"and {len(segment_records)} segments successfully"
                 )
                 
@@ -196,7 +243,6 @@ class DBSaver:
             custom_logger.error(f"Failed to save hybrid tracks: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
 
-    
     async def save_tracks(
         self,
         audio_id: str,
@@ -251,6 +297,51 @@ class DBSaver:
             custom_logger.error(f"Failed to save tracks: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
     
+    async def save_cleaned_audio(
+        self,
+        original_audio_id: str,
+        cleaned_storage_uri: str,
+        processing_method: str = "pyrnnoise"
+    ) -> Dict[str, Any]:
+        """
+        Save cleaned audio metadata to audio_clean table.
+        
+        Args:
+            original_audio_id: Original audio ID
+            cleaned_storage_uri: S3 URI of cleaned audio
+            processing_method: Method used for cleaning
+            
+        Returns:
+            {'success': bool, 'data': {'cleaned_audio_id'}, 'error': str}
+        """
+        try:            
+            custom_logger.info(f"Saving cleaned audio for original_id: {original_audio_id}")
+            
+            cleaned_record = AudioClean(
+                original_audio_id=uuid.UUID(original_audio_id),
+                storage_uri=cleaned_storage_uri,
+                processing_method=processing_method,
+                created_at=datetime.utcnow()
+            )
+            
+            async with AsyncSessionLocal() as session:
+                session.add(cleaned_record)
+                await session.commit()
+                await session.refresh(cleaned_record)
+                
+                cleaned_audio_id = str(cleaned_record.cleaned_audio_id)
+                custom_logger.info(f"Cleaned audio saved: cleaned_audio_id={cleaned_audio_id}")
+                
+                return {
+                    'success': True,
+                    'data': {'cleaned_audio_id': cleaned_audio_id},
+                    'error': None
+                }
+        
+        except Exception as e:
+            custom_logger.error(f"Failed to save cleaned audio: {str(e)}", exc_info=True)
+            return {'success': False, 'data': None, 'error': str(e)}
+
     async def update_processing_results(
         self,
         audio_id: str,
@@ -278,7 +369,6 @@ class DBSaver:
                     custom_logger.error(f"Audio {audio_id} not found")
                     return {'success': False, 'data': None, 'error': 'Audio not found'}
                 
-                # Combine all analyses
                 combined_analysis = {
                     'noise_segments': noise_analysis.get('noise_segments', []),
                     'vad_timeline': vad_analysis.get('vad_timeline', []),
@@ -293,13 +383,11 @@ class DBSaver:
                     'processed_at': datetime.utcnow().isoformat()
                 }
                 
-                # Update record
                 audio_record.preprocessed = True
                 audio_record.processed_time = datetime.utcnow()
                 audio_record.status = 'completed'
                 audio_record.noise_analysis = combined_analysis
                 
-                # Update duration if available
                 if 'total_duration' in combined_analysis['statistics']:
                     audio_record.duration = combined_analysis['statistics']['total_duration']
                 
@@ -310,4 +398,61 @@ class DBSaver:
                 
         except Exception as e:
             custom_logger.error(f"Failed to update audio {audio_id}: {str(e)}", exc_info=True)
+            return {'success': False, 'data': None, 'error': str(e)}
+
+    async def update_track_transcripts(
+        self,
+        audio_id: str,
+        transcribed_tracks: List[Dict]
+    ) -> Dict[str, Any]:
+        """
+        UPDATE existing speaker tracks with transcript and words data.
+        
+        Args:
+            audio_id: Audio ID  
+            transcribed_tracks: List of tracks with transcript/words
+            
+        Returns:
+            {'success': bool, 'data': {'tracks_updated'}, 'error': str}
+        """
+        try:
+            custom_logger.info(f"Updating transcripts for {len(transcribed_tracks)} tracks")
+            
+            audio_uuid = uuid.UUID(audio_id)
+            updated_count = 0
+            
+            async with AsyncSessionLocal() as session:
+                for track in transcribed_tracks:
+                    speaker_id = track['speaker_id']
+                    transcript = track.get('transcript')
+                    words = track.get('words')
+                    
+                    update_stmt = update(SpeakerTrack).where(
+                        SpeakerTrack.audio_id == audio_uuid,
+                        SpeakerTrack.speaker_id == speaker_id
+                    ).values(
+                        transcript=transcript,
+                        words=words
+                    )
+                    
+                    result = await session.execute(update_stmt)
+                    
+                    if result.rowcount > 0:
+                        updated_count += 1
+                        custom_logger.debug(f"Updated speaker {speaker_id} transcript")
+                    else:
+                        custom_logger.warning(f"No track found for speaker {speaker_id}")
+                
+                await session.commit()
+                
+                custom_logger.info(f"Updated {updated_count} tracks with transcripts")
+                
+                return {
+                    'success': True,
+                    'data': {'tracks_updated': updated_count},
+                    'error': None
+                }
+        
+        except Exception as e:
+            custom_logger.error(f"Failed to update track transcripts: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}

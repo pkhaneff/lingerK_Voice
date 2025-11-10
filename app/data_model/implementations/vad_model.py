@@ -26,7 +26,7 @@ class VADModel(BaseModel):
             hf_token = self.config.get('hf_token')
             if hf_token:
                 login(token=hf_token, add_to_git_credential=False)
-                custom_logger.info("✅ Logged in to HuggingFace")
+                custom_logger.info(" Logged in to HuggingFace")
             else:
                 custom_logger.warning("No HF token provided")
             return True
@@ -47,7 +47,7 @@ class VADModel(BaseModel):
             if hf_token:
                 try:
                     login(token=hf_token, add_to_git_credential=False)
-                    custom_logger.info("✅ HuggingFace authentication success")
+                    custom_logger.info(" HuggingFace authentication success")
                 except Exception as e:
                     custom_logger.warning(f"HF login warning: {e}")
             
@@ -65,7 +65,7 @@ class VADModel(BaseModel):
             device = self.config.get('device', 'cpu')
             try:
                 self.model.to(device)
-                custom_logger.info(f"✅ VAD model loaded on device: {device}")
+                custom_logger.info(f" VAD model loaded on device: {device}")
             except Exception as e:
                 custom_logger.warning(f"Could not move to {device}: {e}, using CPU")
                 self.model.to('cpu')
@@ -96,7 +96,7 @@ class VADModel(BaseModel):
             else:
                 speech_timeline = vad_output
             
-            custom_logger.info(f"✅ VAD completed: {len(speech_timeline)} segments")
+            custom_logger.info(f" VAD completed: {len(speech_timeline)} segments")
             return speech_timeline
             
         except Exception as e:

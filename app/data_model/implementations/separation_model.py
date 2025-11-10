@@ -60,7 +60,7 @@ class ConvTasNetSeparator(BaseModel):
             )
             
             self.is_loaded = True
-            custom_logger.info(f"✅ ConvTasNet loaded on {self.device}")
+            custom_logger.info(f" ConvTasNet loaded on {self.device}")
             return True
             
         except Exception as e:
@@ -75,13 +75,11 @@ class ConvTasNetSeparator(BaseModel):
         custom_logger.info(f"Loading from: {model_name}")
         custom_logger.info(f"Cache dir: {cache_dir}")
         
-        # ✅ Load Asteroid model from HuggingFace
         self.model = AsteroidBaseModel.from_pretrained(
             model_name,
             cache_dir=str(cache_dir)
         )
         
-        # Move to device
         self.model = self.model.to(self.device)
         self.model.eval()
         
@@ -101,7 +99,6 @@ class ConvTasNetSeparator(BaseModel):
         try:
             custom_logger.info(f"Separating {len(overlap_regions)} overlap regions")
             
-            # Load full audio
             audio_data, loaded_sr = librosa.load(audio_path, sr=sr, mono=True)
             
             separated_regions = []
@@ -110,12 +107,10 @@ class ConvTasNetSeparator(BaseModel):
                 start_time = region['start_time']
                 end_time = region['end_time']
                 
-                # Extract region
                 start_sample = int(start_time * sr)
                 end_sample = int(end_time * sr)
                 region_audio = audio_data[start_sample:end_sample]
                 
-                # Separate
                 loop = asyncio.get_event_loop()
                 sources = await loop.run_in_executor(
                     None,
@@ -152,29 +147,23 @@ class ConvTasNetSeparator(BaseModel):
     def _separate_sync(self, audio: np.ndarray, sr: int) -> Optional[List[np.ndarray]]:
         """Sync separation."""
         try:
-            # Ensure (samples,) shape
             if audio.ndim != 1:
                 audio = audio.flatten()
             
-            # Convert to tensor (1, samples)
             audio_tensor = torch.from_numpy(audio).float().unsqueeze(0)
             audio_tensor = audio_tensor.to(self.device)
             
-            # Separate
             with torch.no_grad():
-                # Asteroid model returns (batch, n_sources, samples)
                 est_sources = self.model(audio_tensor)
             
-            # Convert back to numpy
             est_sources = est_sources.cpu().numpy()
             
-            # Extract 2 sources
             if est_sources.shape[1] < 2:
                 custom_logger.error(f"Expected 2 sources, got {est_sources.shape[1]}")
                 return None
             
-            source_0 = est_sources[0, 0, :]  # Speaker A
-            source_1 = est_sources[0, 1, :]  # Speaker B
+            source_0 = est_sources[0, 0, :]
+            source_1 = est_sources[0, 1, :]
             
             return [source_0, source_1]
             

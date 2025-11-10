@@ -32,31 +32,26 @@ class AudioExtractor:
         try:
             custom_logger.info(f"Extracting audio from: {video_s3_key}")
             
-            # Create temp files
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
                 temp_video_path = f.name
             
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
                 temp_audio_path = f.name
             
-            # Download video
             video_object = get_object(video_s3_key, self.bucket_name)
             with open(temp_video_path, 'wb') as f:
                 f.write(video_object.body.read())
             
             custom_logger.info(f"Video downloaded to: {temp_video_path}")
             
-            # Extract audio
             result = await self._extract_audio(temp_video_path, temp_audio_path)
             
             if not result['success']:
                 self._cleanup_files(temp_video_path, temp_audio_path)
                 return result
             
-            # Cleanup video, keep audio
             self._cleanup_files(temp_video_path)
             
-            # Read audio content
             with open(temp_audio_path, 'rb') as f:
                 audio_content = f.read()
             
@@ -102,7 +97,6 @@ class AudioExtractor:
             
             audio_clip = video_clip.audio
             
-            # Write audio
             try:
                 audio_clip.write_audiofile(audio_path, codec='mp3', bitrate='128k')
             except TypeError:

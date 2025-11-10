@@ -14,25 +14,20 @@ class SpeakerTrack(Base):
                         sa.ForeignKey("audio_ingest.audio_id", ondelete="CASCADE"),
                         nullable=False)
     
-    # Speaker identity
     speaker_id = sa.Column(sa.Integer, nullable=False)
-    track_type = sa.Column(sa.String(20), nullable=False)  # 'single', 'separated'
+    track_type = sa.Column(sa.String(20), nullable=False)  
     
-    # Summary ranges stored as JSONB array: [[start, end], [start, end], ...]
     ranges = sa.Column(JSONB, nullable=False)
     
-    # Aggregate metrics
     total_duration = sa.Column(sa.Float, nullable=False)
-    coverage = sa.Column(sa.Float, nullable=False)  # Percentage of total audio
+    coverage = sa.Column(sa.Float, nullable=False)  
     
-    # Transcription data (NEW)
     transcript = sa.Column(sa.Text, nullable=True)
-    words = sa.Column(JSONB, nullable=True)  # Array of {word, start, end, confidence}
+    words = sa.Column(JSONB, nullable=True)  
     
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False,
                           server_default=sa.text("NOW()"))
     
-    # Relationships
     audio = relationship("AudioIngest", back_populates="speaker_tracks", lazy="select")
     segments = relationship("TrackSegment", back_populates="track", 
                            cascade="all, delete-orphan", lazy="select")
