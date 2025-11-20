@@ -289,7 +289,7 @@ class WhisperTranscriber:
                 "language": language,
                 "task": "transcribe",
                 "return_timestamps": True,
-                "max_new_tokens": 1000,  # Conservative limit
+                "max_new_tokens": 1000, 
                 "do_sample": False,
                 "num_beams": 1,
             }
