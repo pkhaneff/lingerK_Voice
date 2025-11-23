@@ -40,6 +40,7 @@ AWS_ACCESS_KEY: str = config("AWS_ACCESS_KEY")
 AWS_SECRET_KEY: str = config("AWS_SECRET_KEY")
 AWS_REGION: str = config("AWS_REGION", default="ap-northeast-1")
 HF_TOKEN: str = config("HF_TOKEN", default="")
+GEMINI_API_KEY: str = config("GEMINI_API_KEY", default="")
 
 AUDIO_FILE_SEIZE: int = config("AUDIO_FILE_SEIZE", cast=int, default=52428800)  # 10MB
 VIDEO_FILE_SEIZE: int = config("VIDEO_FILE_SEIZE", cast=int, default=1073741824) 

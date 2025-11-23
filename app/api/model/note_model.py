@@ -29,7 +29,9 @@ class Note(Base):
                           server_default=sa.text("NOW()"))
     updated_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
 
-    audio_clean = relationship("AudioClean", lazy="select")
+    # SỬA: Thêm back_populates
+    audio_clean = relationship("AudioClean", back_populates="notes", lazy="select")
+    
     sections = relationship("NoteSection", back_populates="note", 
                            cascade="all, delete-orphan", 
                            order_by="NoteSection.section_order",
@@ -48,9 +50,7 @@ class Note(Base):
         sa.Index("idx_notes_tags", "tags", postgresql_using="gin"),
     )
 
-
 class NoteSection(Base):
-    """Note sections table - stores detailed section information"""
     __tablename__ = "note_sections"
 
     note_section_id = sa.Column(UUID(as_uuid=True), primary_key=True,

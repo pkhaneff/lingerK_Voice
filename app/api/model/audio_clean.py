@@ -19,7 +19,7 @@ class AudioClean(Base):
                           server_default=sa.text("NOW()"))
 
     original_audio = relationship("AudioIngest", lazy="select")
-    notes = relationship("Note", lazy="select")
+    notes = relationship("Note",back_populates="audio_clean", lazy="select")
 
     __table_args__ = (
         sa.Index("idx_audio_clean_original_id", "original_audio_id"),

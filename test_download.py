@@ -1,29 +1,44 @@
-# from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
-# import torch
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
 
-# model_id = "vinai/PhoWhisper-medium"
-# cache_dir = "app/data_model/storage/phowhisper"
+load_dotenv()
 
-# print(f"Downloading {model_id} to {cache_dir}...")
-# print("This will only download PyTorch files (1.5GB)")
+api_key = os.getenv('GEMINI_API_KEY')
+print(f"API Key: {api_key[:20]}...")
 
-# model = AutoModelForSpeechSeq2Seq.from_pretrained(
-#     model_id,
-#     torch_dtype=torch.float16,
-#     cache_dir=cache_dir,
-# )
+genai.configure(api_key=api_key)
 
-# processor = AutoProcessor.from_pretrained(
-#     model_id,
-#     cache_dir=cache_dir
-# )
+model = genai.GenerativeModel('gemini-2.0-flash')
 
-# print(" Download completed!")
-# print(f"Model saved to: {cache_dir}")
+prompt = "Chuẩn hóa câu này: xin chào em em là sinh viên"
 
-from huggingface_hub import snapshot_download
-snapshot_download(
-    "vinai/PhoWhisper-medium",
-    local_dir="app/data_model/storage/phowhisper",
-    allow_patterns=["pytorch_model.bin", "*.json", "*.txt", "*.json", "*.md"]
-)
+try:
+    print("Calling Gemini...")
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.GenerationConfig(
+            temperature=0.1,
+            max_output_tokens=100,
+        )
+    )
+    
+    print(f"Response type: {type(response)}")
+    print(f"Response: {response}")
+    
+    if hasattr(response, 'text'):
+        print(f"Text: {response.text}")
+    else:
+        print("No text attribute!")
+        print(f"Dir: {dir(response)}")
+    
+    if hasattr(response, 'prompt_feedback'):
+        print(f"Feedback: {response.prompt_feedback}")
+    
+    if hasattr(response, 'usage_metadata'):
+        print(f"Tokens: {response.usage_metadata}")
+    
+except Exception as e:
+    print(f"ERROR: {e}")
+    import traceback
+    traceback.print_exc()
