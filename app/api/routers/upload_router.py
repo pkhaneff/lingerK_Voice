@@ -19,9 +19,11 @@ from app.api.services.metadata.metadata_extractor import MetadataExtractor
 from app.api.services.metadata.db_saver import DBSaver
 from app.api.responses.base import BaseResponse
 from app.data_model.implementations.separation_model import ConvTasNetSeparator
+from app.api.services.processing.normalize_service import GeminiTextNormalizer
+from app.api.model.note_model import Note, NoteSection 
 from app.core.config import (
     AUDIO_EXTS, VIDEO_EXTS, AUDIO_FILE_SEIZE, VIDEO_FILE_SEIZE,
-    S3_PREFIX_AUDIO, S3_PREFIX_VIDEO
+    S3_PREFIX_AUDIO, S3_PREFIX_VIDEO, GEMINI_API_KEY
 )
 from app.api.db.session import AsyncSessionLocal
 from app.api.model.api_key import ApiKey
@@ -879,4 +881,74 @@ async def get_full_transcript_api(
         raise
     except Exception as e:
         custom_logger.error(f"Get transcript failed: {str(e)}", exc_info=True)
+        raise HTTPException(500, f"Internal server error: {str(e)}")
+@router.post("/normalize_text")
+async def normalize_text_api(
+    api_key: str = Form(...),
+    text: str = Form(...)
+):
+    """
+    Normalize Vietnamese text from speech-to-text
+    
+    Simple endpoint: input text, output normalized text
+    
+    Args:
+        api_key: User API key
+        text: Raw text from STT (no punctuation, fillers, etc)
+        
+    Returns:
+        {
+            'success': bool,
+            'data': {
+                'original_text': str,
+                'normalized_text': str,
+                'statistics': {
+                    'original_length': int,
+                    'normalized_length': int,
+                    'reduction_ratio': float,
+                    'processing_time': float,
+                    'cost_estimate': float
+                }
+            }
+        }
+    """
+    try:
+        custom_logger.info(f"Normalizing text: {len(text)} chars")
+        
+        # Validate API key
+        user_id = await validate_api_key(api_key)
+        
+        # Validate input
+        if not text or len(text.strip()) < 10:
+            raise HTTPException(400, "Text must be at least 10 characters")
+        
+        # Check Gemini API key
+        if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "":
+            raise HTTPException(500, "Gemini API key not configured")
+        
+        # Normalize with Gemini (single pass)
+        normalizer = GeminiTextNormalizer(api_key=GEMINI_API_KEY)
+        result = await normalizer.normalize_text(text)
+        
+        if not result.get('success', False):
+            error_msg = result.get('error', 'Normalization failed')
+            custom_logger.error(f"Normalization error: {error_msg}")
+            raise HTTPException(500, error_msg)
+        
+        # Return clean response
+        return BaseResponse.success_response(
+            message="Text normalized successfully",
+            data={
+                'original_text': text,
+                'normalized_text': result['data']['normalized_text'],
+                'statistics': result['data']['statistics']
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        custom_logger.error(f"Normalization failed: {e}")
+        custom_logger.error(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(500, f"Internal server error: {str(e)}")
