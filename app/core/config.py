@@ -38,7 +38,7 @@ DEVICE = _probe_cuda()
 
 AWS_ACCESS_KEY: str = config("AWS_ACCESS_KEY")
 AWS_SECRET_KEY: str = config("AWS_SECRET_KEY")
-AWS_REGION: str = config("AWS_REGION", default="ap-northeast-1")
+AWS_REGION: str = config("AWS_REGION", default="ap-southeast-2")
 HF_TOKEN: str = config("HF_TOKEN", default="")
 GEMINI_API_KEY: str = config("GEMINI_API_KEY", default="")
 

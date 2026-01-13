@@ -507,8 +507,8 @@ def main():
         
         uploaded_file = st.file_uploader(
             "Choose audio or video file",
-            type=['mp3', 'wav', 'ogg', 'mp4', 'avi', 'mov'],
-            help="Supported: mp3, wav, flac, mp4, avi, mov"
+            type=['mp3', 'wav', 'ogg', 'mp4', 'avi', 'mov', 'm4a', 'flac'],
+            help="Supported: mp3, wav, ogg, m4a, flac, mp4, avi, mov"
         )
         
         if uploaded_file:

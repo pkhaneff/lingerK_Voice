@@ -144,7 +144,7 @@ async def upload_file_api(
         custom_logger.info(f"Starting upload: {file.filename}")
         
         user_id = await validate_api_key(api_key)
-        
+
         file_type, ext = validate_file_extension(file.filename)
         validate_file_size(file.size, file_type)
         s3_key = generate_s3_key(file.filename)

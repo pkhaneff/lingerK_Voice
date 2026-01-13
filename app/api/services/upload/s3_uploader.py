@@ -16,6 +16,17 @@ class S3Uploader:
         self.bucket_name = s3_bucket
         self.s3_prefix = s3_prefix
         self.s3_client = session.client("s3")
+
+        import os
+        custom_logger.info(f"=== S3Uploader Credentials ===")
+        custom_logger.info(f"AWS_ACCESS_KEY from config: {os.getenv('AWS_ACCESS_KEY', 'NOT SET')}")
+        custom_logger.info(f"AWS_SECRET_KEY from config: {os.getenv('AWS_SECRET_KEY', 'NOT SET')[:10]}...")
+        
+        # Print what boto3 is using
+        credentials = self.s3_client._request_signer._credentials
+        custom_logger.info(f"S3 Client using Access Key: {credentials.access_key}")
+        custom_logger.info(f"S3 Client using Secret Key: {credentials.secret_key[:10]}...")
+        custom_logger.info(f"============================")
     
     async def upload_file(self, file: UploadFile, s3_key: str) -> Dict[str, Any]:
         """
