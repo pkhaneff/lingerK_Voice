@@ -51,6 +51,7 @@ VIDEO_CHUNK_SIZE_LARGE: int = config("VIDEO_CHUNK_SIZE_LARGE", cast=int, default
 
 S3_PREFIX_AUDIO: str = config("S3_PREFIX_AUDIO", default="uploads/audio")
 S3_PREFIX_VIDEO: str = config("S3_PREFIX_VIDEO", default="uploads/video")
+S3_BUCKET_NAME: str = config("S3_BUCKET_NAME", default="s3-voice-identification")
 
 AUDIO_EXTS: list[str] = config("AUDIO_EXTS", cast=CommaSeparatedStrings, default="m4a,ogg,mp3")
 VIDEO_EXTS: list[str] = config("VIDEO_EXTS", cast=CommaSeparatedStrings, default="mp4")

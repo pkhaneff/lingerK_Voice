@@ -34,7 +34,7 @@ class MetadataExtractor:
             with tempfile.NamedTemporaryFile(suffix='.tmp', delete=False) as f:
                 temp_file_path = f.name
             
-            audio_object = get_object(audio_s3_key, self.bucket_name)
+            audio_object = await get_object(audio_s3_key, self.bucket_name)
             with open(temp_file_path, 'wb') as f:
                 f.write(audio_object.body.read())
             

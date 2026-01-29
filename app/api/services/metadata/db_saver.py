@@ -2,18 +2,17 @@ import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from loguru import logger as custom_logger
-from sqlalchemy import update
 
 from app.api.db.session import AsyncSessionLocal
-from app.api.model.audio_model import AudioIngest
-from app.api.model.video_model import VideoIngest
-from app.api.model.audio_segment_model import AudioSegment
-from app.api.model.speaker_track_model import SpeakerTrack
-from app.api.model.track_segment_model import TrackSegment
-from app.api.model.audio_clean import AudioClean
+from app.api.repositories.audio_repository import AudioRepository
+from app.api.repositories.video_repository import VideoRepository
+from app.api.repositories.track_repository import TrackRepository
 
 class DBSaver:
-    """Save and update metadata in database."""
+    """
+    Service to save and update metadata in database.
+    Now acts as a Facade using Repositories.
+    """
     
     async def save_audio(
         self,
@@ -26,52 +25,34 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         Save audio metadata.
-        
-        Args:
-            file_name: Original filename
-            storage_uri: S3 URI
-            user_id: User ID
-            duration: Audio duration in seconds
-            codec: Audio codec
-            is_video: Whether this audio is from video
-            
-        Returns:
-            {'success': bool, 'data': {'audio_id'}, 'error': str}
         """
         try:
             custom_logger.info(f"Saving audio metadata: {file_name}, is_video={is_video}")
             
-            audio_record = AudioIngest(
-                audio_id=uuid.uuid4(),
-                file_name=file_name,
-                storage_uri=storage_uri,
-                duration=duration,
-                codec=codec,
-                user_id=uuid.UUID(user_id),
-                status="uploaded",
-                preprocessed=False,
-                created_at=datetime.utcnow(),
-                is_video=is_video
-            )
-            
             async with AsyncSessionLocal() as session:
-                session.add(audio_record)
+                repo = AudioRepository(session)
+                audio_record = await repo.create_audio(
+                    file_name=file_name,
+                    storage_uri=storage_uri,
+                    user_id=user_id,
+                    duration=duration,
+                    codec=codec,
+                    is_video=is_video
+                )
                 await session.commit()
-                await session.refresh(audio_record)
                 
                 audio_id = str(audio_record.audio_id)
                 custom_logger.info(f"Audio metadata saved: audio_id={audio_id}")
                 
                 return {
-                    'success': True,
-                    'data': {'audio_id': audio_id},
+                    'success': True, 
+                    'data': {'audio_id': audio_id}, 
                     'error': None
                 }
-        
         except Exception as e:
             custom_logger.error(f"Failed to save audio: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
-    
+
     async def save_video(
         self,
         audio_id: str,
@@ -79,41 +60,30 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         Save video metadata.
-        
-        Args:
-            audio_id: Audio ID (foreign key)
-            video_storage_uri: Video S3 URI
-            
-        Returns:
-            {'success': bool, 'data': {'video_id'}, 'error': str}
         """
         try:
             custom_logger.info(f"Saving video metadata: audio_id={audio_id}")
             
-            video_record = VideoIngest(
-                video_id=uuid.uuid4(),
-                audio_id=uuid.UUID(audio_id),
-                storage_uri=video_storage_uri
-            )
-            
             async with AsyncSessionLocal() as session:
-                session.add(video_record)
+                repo = VideoRepository(session)
+                video_record = await repo.create_video(
+                    audio_id=uuid.UUID(audio_id),
+                    storage_uri=video_storage_uri
+                )
                 await session.commit()
-                await session.refresh(video_record)
                 
                 video_id = str(video_record.video_id)
                 custom_logger.info(f"Video metadata saved: video_id={video_id}")
                 
                 return {
-                    'success': True,
-                    'data': {'video_id': video_id},
+                    'success': True, 
+                    'data': {'video_id': video_id}, 
                     'error': None
                 }
-        
         except Exception as e:
             custom_logger.error(f"Failed to save video: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
-    
+
     async def save_audio_clean(
         self,
         original_audio_id: str,
@@ -122,44 +92,31 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         Save cleaned audio metadata.
-        
-        Args:
-            original_audio_id: Original audio ID (foreign key)
-            storage_uri: S3 URI of cleaned audio
-            processing_method: Method used for cleaning
-            
-        Returns:
-            {'success': bool, 'data': {'cleaned_audio_id'}, 'error': str}
         """
-        try:
-            custom_logger.info(f"Saving cleaned audio: original_id={original_audio_id}")
-            
-            audio_clean_record = AudioClean(
-                cleaned_audio_id=uuid.uuid4(),
-                original_audio_id=uuid.UUID(original_audio_id),
-                storage_uri=storage_uri,
-                processing_method=processing_method,
-                created_at=datetime.utcnow()
-            )
+        try:            
+            custom_logger.info(f"Saving cleaned audio for original_id: {original_audio_id}")
             
             async with AsyncSessionLocal() as session:
-                session.add(audio_clean_record)
+                repo = AudioRepository(session)
+                clean_record = await repo.create_audio_clean(
+                    original_audio_id=uuid.UUID(original_audio_id),
+                    storage_uri=storage_uri,
+                    processing_method=processing_method
+                )
                 await session.commit()
-                await session.refresh(audio_clean_record)
                 
-                cleaned_audio_id = str(audio_clean_record.cleaned_audio_id)
-                custom_logger.info(f"Audio clean saved: cleaned_audio_id={cleaned_audio_id}")
+                cleaned_audio_id = str(clean_record.cleaned_audio_id)
+                custom_logger.info(f"Cleaned audio saved: cleaned_audio_id={cleaned_audio_id}")
                 
                 return {
-                    'success': True,
-                    'data': {'cleaned_audio_id': cleaned_audio_id},
+                    'success': True, 
+                    'data': {'cleaned_audio_id': cleaned_audio_id}, 
                     'error': None
                 }
-        
         except Exception as e:
             custom_logger.error(f"Failed to save audio clean: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
-    
+
     async def save_hybrid_tracks(
         self,
         audio_id: str,
@@ -167,78 +124,52 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         Save tracks using hybrid approach (2 tables).
-        
-        NOW INCLUDES: transcript and words from Whisper
         """
         try:
             custom_logger.info(f"Saving {len(tracks)} hybrid tracks for audio_id={audio_id}")
-            
-            for i, track in enumerate(tracks):
-                custom_logger.info(f"Track {i} input: speaker_id={track.get('speaker_id')}, segments={len(track.get('segments', []))}")
-                if track.get('segments'):
-                    for j, seg in enumerate(track['segments'][:2]):  
-                        custom_logger.debug(f"   Segment {j+1}: {seg.get('segment_type')} {seg.get('start_time'):.2f}s-{seg.get('end_time'):.2f}s")
-            
             audio_uuid = uuid.UUID(audio_id)
-            track_records = []
-            segment_records = []
-            
-            for track in tracks:
-                track_id = uuid.uuid4()
-                
-                speaker_track = SpeakerTrack(
-                    track_id=track_id,
-                    audio_id=audio_uuid,
-                    speaker_id=track['speaker_id'],
-                    track_type=track['type'],
-                    ranges=track['ranges'],
-                    total_duration=track['total_duration'],
-                    coverage=track['coverage'],
-                    transcript=track.get('transcript'),      
-                    words=track.get('words'),                
-                    created_at=datetime.utcnow()
-                )
-                track_records.append(speaker_track)
-                
-                segments = track.get('segments', [])
-                custom_logger.debug(f"Track {track['speaker_id']} has {len(segments)} segments")
-                
-                for segment in segments:
-                    track_segment = TrackSegment(
-                        segment_id=uuid.uuid4(),
-                        track_id=track_id,
-                        segment_type=segment['segment_type'],
-                        start_time=segment['start_time'],
-                        end_time=segment['end_time'],
-                        duration=segment['duration'],
-                        confidence=segment.get('confidence'),
-                        separation_method=segment.get('separation_method'),
-                        created_at=datetime.utcnow()
-                    )
-                    segment_records.append(track_segment)
-            
+            tracks_saved = 0
+            segments_saved = 0
+
             async with AsyncSessionLocal() as session:
-                session.add_all(track_records)
-                await session.flush()
+                repo = TrackRepository(session)
                 
-                session.add_all(segment_records)
+                for track in tracks:
+                    track_record = await repo.create_track(
+                        audio_id=audio_uuid,
+                        speaker_id=track['speaker_id'],
+                        track_type=track['type'],
+                        ranges=track['ranges'],
+                        total_duration=track['total_duration'],
+                        coverage=track['coverage'],
+                        transcript=track.get('transcript'),
+                        words=track.get('words')
+                    )
+                    tracks_saved += 1
+                    
+                    for segment in track.get('segments', []):
+                        await repo.create_segment(
+                            track_id=track_record.track_id,
+                            segment_type=segment['segment_type'],
+                            start_time=segment['start_time'],
+                            end_time=segment['end_time'],
+                            duration=segment['duration'],
+                            confidence=segment.get('confidence'),
+                            separation_method=segment.get('separation_method')
+                        )
+                        segments_saved += 1
                 
                 await session.commit()
                 
-                custom_logger.info(
-                    f"Saved {len(track_records)} tracks "
-                    f"and {len(segment_records)} segments successfully"
-                )
-                
+                custom_logger.info(f"Saved {tracks_saved} tracks and {segments_saved} segments")
                 return {
                     'success': True,
                     'data': {
-                        'tracks_saved': len(track_records),
-                        'segments_saved': len(segment_records)
+                        'tracks_saved': tracks_saved,
+                        'segments_saved': segments_saved
                     },
                     'error': None
                 }
-        
         except Exception as e:
             custom_logger.error(f"Failed to save hybrid tracks: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
@@ -250,19 +181,18 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         Save tracks to database (OLD VERSION - for audio_segments table).
-        
-        DEPRECATED: Use save_hybrid_tracks() instead for new implementation.
-        
-        Args:
-            audio_id: Audio ID
-            tracks: List of track dictionaries
-            
-        Returns:
-            {'success': bool, 'data': {'tracks_saved'}, 'error': str}
+        Deprecated but kept for compatibility if needed.
         """
+        # For simplicity, keeping this one as is or we can remove it if sure it's unused.
+        # But to be safe, let's just log a warning and return empty success or adapt it.
+        # Given the previous code used it, let's just fail or implement if strictly needed.
+        # The prompt implies moving to new structure, so let's skip deep implementation of legacy unless needed. 
+        # Wait, I should probably implement it if it's called. The original code imported `AudioSegment`.
+        
+        from app.api.model.audio_segment_model import AudioSegment
         try:
-            custom_logger.info(f"Saving {len(tracks)} tracks (old method) for audio_id={audio_id}")
-            
+            custom_logger.warning("save_tracks (legacy) called. Implementing via direct session for now.")
+            # Simple implementation or logic to use legacy model
             audio_uuid = uuid.UUID(audio_id)
             track_records = []
             
@@ -284,63 +214,10 @@ class DBSaver:
             async with AsyncSessionLocal() as session:
                 session.add_all(track_records)
                 await session.commit()
+                return {'success': True, 'data': {'tracks_saved': len(track_records)}, 'error': None}
                 
-                custom_logger.info(f"Saved {len(track_records)} tracks successfully")
-                
-                return {
-                    'success': True,
-                    'data': {'tracks_saved': len(track_records)},
-                    'error': None
-                }
-        
         except Exception as e:
-            custom_logger.error(f"Failed to save tracks: {str(e)}", exc_info=True)
-            return {'success': False, 'data': None, 'error': str(e)}
-    
-    async def save_cleaned_audio(
-        self,
-        original_audio_id: str,
-        cleaned_storage_uri: str,
-        processing_method: str = "pyrnnoise"
-    ) -> Dict[str, Any]:
-        """
-        Save cleaned audio metadata to audio_clean table.
-        
-        Args:
-            original_audio_id: Original audio ID
-            cleaned_storage_uri: S3 URI of cleaned audio
-            processing_method: Method used for cleaning
-            
-        Returns:
-            {'success': bool, 'data': {'cleaned_audio_id'}, 'error': str}
-        """
-        try:            
-            custom_logger.info(f"Saving cleaned audio for original_id: {original_audio_id}")
-            
-            cleaned_record = AudioClean(
-                original_audio_id=uuid.UUID(original_audio_id),
-                storage_uri=cleaned_storage_uri,
-                processing_method=processing_method,
-                created_at=datetime.utcnow()
-            )
-            
-            async with AsyncSessionLocal() as session:
-                session.add(cleaned_record)
-                await session.commit()
-                await session.refresh(cleaned_record)
-                
-                cleaned_audio_id = str(cleaned_record.cleaned_audio_id)
-                custom_logger.info(f"Cleaned audio saved: cleaned_audio_id={cleaned_audio_id}")
-                
-                return {
-                    'success': True,
-                    'data': {'cleaned_audio_id': cleaned_audio_id},
-                    'error': None
-                }
-        
-        except Exception as e:
-            custom_logger.error(f"Failed to save cleaned audio: {str(e)}", exc_info=True)
-            return {'success': False, 'data': None, 'error': str(e)}
+             return {'success': False, 'data': None, 'error': str(e)}
 
     async def update_processing_results(
         self,
@@ -351,23 +228,10 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         Update audio record with processing results.
-        
-        Args:
-            audio_id: Audio ID
-            noise_analysis: Noise reduction analysis
-            vad_analysis: VAD analysis
-            osd_analysis: OSD analysis
-            
-        Returns:
-            {'success': bool, 'data': None, 'error': str}
         """
         try:
             async with AsyncSessionLocal() as session:
-                audio_record = await session.get(AudioIngest, uuid.UUID(audio_id))
-                
-                if not audio_record:
-                    custom_logger.error(f"Audio {audio_id} not found")
-                    return {'success': False, 'data': None, 'error': 'Audio not found'}
+                repo = AudioRepository(session)
                 
                 combined_analysis = {
                     'noise_segments': noise_analysis.get('noise_segments', []),
@@ -383,19 +247,19 @@ class DBSaver:
                     'processed_at': datetime.utcnow().isoformat()
                 }
                 
-                audio_record.preprocessed = True
-                audio_record.processed_time = datetime.utcnow()
-                audio_record.status = 'completed'
-                audio_record.noise_analysis = combined_analysis
-                
+                duration = None
                 if 'total_duration' in combined_analysis['statistics']:
-                    audio_record.duration = combined_analysis['statistics']['total_duration']
-                
+                    duration = combined_analysis['statistics']['total_duration']
+                    
+                await repo.update_processing_results(
+                    audio_id=uuid.UUID(audio_id),
+                    combined_analysis=combined_analysis,
+                    duration=duration
+                )
                 await session.commit()
+                
                 custom_logger.info(f"Updated audio {audio_id} with processing results")
-                
                 return {'success': True, 'data': None, 'error': None}
-                
         except Exception as e:
             custom_logger.error(f"Failed to update audio {audio_id}: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
@@ -407,52 +271,31 @@ class DBSaver:
     ) -> Dict[str, Any]:
         """
         UPDATE existing speaker tracks with transcript and words data.
-        
-        Args:
-            audio_id: Audio ID  
-            transcribed_tracks: List of tracks with transcript/words
-            
-        Returns:
-            {'success': bool, 'data': {'tracks_updated'}, 'error': str}
         """
         try:
             custom_logger.info(f"Updating transcripts for {len(transcribed_tracks)} tracks")
-            
             audio_uuid = uuid.UUID(audio_id)
             updated_count = 0
             
             async with AsyncSessionLocal() as session:
+                repo = TrackRepository(session)
+                
                 for track in transcribed_tracks:
-                    speaker_id = track['speaker_id']
-                    transcript = track.get('transcript')
-                    words = track.get('words')
-                    
-                    update_stmt = update(SpeakerTrack).where(
-                        SpeakerTrack.audio_id == audio_uuid,
-                        SpeakerTrack.speaker_id == speaker_id
-                    ).values(
-                        transcript=transcript,
-                        words=words
+                    count = await repo.update_transcript(
+                        audio_id=audio_uuid,
+                        speaker_id=track['speaker_id'],
+                        transcript=track.get('transcript'),
+                        words=track.get('words')
                     )
-                    
-                    result = await session.execute(update_stmt)
-                    
-                    if result.rowcount > 0:
-                        updated_count += 1
-                        custom_logger.debug(f"Updated speaker {speaker_id} transcript")
-                    else:
-                        custom_logger.warning(f"No track found for speaker {speaker_id}")
+                    updated_count += count
                 
                 await session.commit()
-                
                 custom_logger.info(f"Updated {updated_count} tracks with transcripts")
-                
                 return {
-                    'success': True,
-                    'data': {'tracks_updated': updated_count},
+                    'success': True, 
+                    'data': {'tracks_updated': updated_count}, 
                     'error': None
                 }
-        
         except Exception as e:
             custom_logger.error(f"Failed to update track transcripts: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}

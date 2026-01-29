@@ -38,9 +38,13 @@ class AudioExtractor:
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
                 temp_audio_path = f.name
             
-            video_object = get_object(video_s3_key, self.bucket_name)
-            with open(temp_video_path, 'wb') as f:
-                f.write(video_object.body.read())
+            video_object = await get_object(video_s3_key, self.bucket_name)
+            
+            def _write_file():
+                with open(temp_video_path, 'wb') as f:
+                    f.write(video_object.body.read())
+                    
+            await loop.run_in_executor(None, _write_file)
             
             custom_logger.info(f"Video downloaded to: {temp_video_path}")
             

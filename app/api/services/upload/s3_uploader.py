@@ -16,17 +16,6 @@ class S3Uploader:
         self.bucket_name = s3_bucket
         self.s3_prefix = s3_prefix
         self.s3_client = session.client("s3")
-
-        import os
-        custom_logger.info(f"=== S3Uploader Credentials ===")
-        custom_logger.info(f"AWS_ACCESS_KEY from config: {os.getenv('AWS_ACCESS_KEY', 'NOT SET')}")
-        custom_logger.info(f"AWS_SECRET_KEY from config: {os.getenv('AWS_SECRET_KEY', 'NOT SET')[:10]}...")
-        
-        # Print what boto3 is using
-        credentials = self.s3_client._request_signer._credentials
-        custom_logger.info(f"S3 Client using Access Key: {credentials.access_key}")
-        custom_logger.info(f"S3 Client using Secret Key: {credentials.secret_key[:10]}...")
-        custom_logger.info(f"============================")
     
     async def upload_file(self, file: UploadFile, s3_key: str) -> Dict[str, Any]:
         """
@@ -79,7 +68,8 @@ class S3Uploader:
                 last_modified=None
             )
             
-            put_object(s3_object, self.bucket_name)
+            # Reformatted to use await
+            await put_object(s3_object, self.bucket_name)
             
             s3_url = f"s3://{self.bucket_name}/{full_s3_key}"
             custom_logger.info(f"Bytes uploaded: {s3_url}")
@@ -114,7 +104,8 @@ class S3Uploader:
                 last_modified=None
             )
             
-            put_object(s3_object, self.bucket_name)
+            # Reformatted to use await
+            await put_object(s3_object, self.bucket_name)
             
             s3_url = f"s3://{self.bucket_name}/{s3_key}"
             custom_logger.info(f"Direct upload completed: {s3_url}")
@@ -136,16 +127,22 @@ class S3Uploader:
     async def _multipart_upload(self, file: UploadFile, s3_key: str, file_size: int) -> Dict[str, Any]:
         """Multipart upload for files >= 100MB"""
         upload_id = None
+        import asyncio
+        loop = asyncio.get_event_loop()
         
         try:
             chunk_size = self._calculate_chunk_size(file_size)
             content_type = self._detect_content_type(file.filename)
             
-            response = self.s3_client.create_multipart_upload(
-                Bucket=self.bucket_name,
-                Key=s3_key,
-                ContentType=content_type
-            )
+            # Async create multipart upload
+            def _create_multipart():
+                return self.s3_client.create_multipart_upload(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    ContentType=content_type
+                )
+            
+            response = await loop.run_in_executor(None, _create_multipart)
             upload_id = response['UploadId']
             custom_logger.info(f"Multipart upload initiated: {upload_id}")
             
@@ -161,13 +158,17 @@ class S3Uploader:
                 if not chunk_data:
                     break
                 
-                part_response = self.s3_client.upload_part(
-                    Bucket=self.bucket_name,
-                    Key=s3_key,
-                    PartNumber=part_number,
-                    UploadId=upload_id,
-                    Body=io.BytesIO(chunk_data)
-                )
+                # Async upload part
+                def _upload_part(p_num, data):
+                    return self.s3_client.upload_part(
+                        Bucket=self.bucket_name,
+                        Key=s3_key,
+                        PartNumber=p_num,
+                        UploadId=upload_id,
+                        Body=io.BytesIO(data)
+                    )
+                
+                part_response = await loop.run_in_executor(None, _upload_part, part_number, chunk_data)
                 
                 parts.append({
                     'PartNumber': part_number,
@@ -180,12 +181,16 @@ class S3Uploader:
                 progress = (bytes_uploaded / file_size) * 100
                 custom_logger.info(f"Upload progress: {progress:.1f}%")
             
-            self.s3_client.complete_multipart_upload(
-                Bucket=self.bucket_name,
-                Key=s3_key,
-                UploadId=upload_id,
-                MultipartUpload={'Parts': parts}
-            )
+            # Async complete upload
+            def _complete_upload():
+                self.s3_client.complete_multipart_upload(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    UploadId=upload_id,
+                    MultipartUpload={'Parts': parts}
+                )
+            
+            await loop.run_in_executor(None, _complete_upload)
             
             s3_url = f"s3://{self.bucket_name}/{s3_key}"
             custom_logger.info(f"Multipart upload completed: {s3_url}")
@@ -206,11 +211,14 @@ class S3Uploader:
             
             if upload_id:
                 try:
-                    self.s3_client.abort_multipart_upload(
-                        Bucket=self.bucket_name,
-                        Key=s3_key,
-                        UploadId=upload_id
-                    )
+                    # Async abort
+                    def _abort_upload():
+                        self.s3_client.abort_multipart_upload(
+                            Bucket=self.bucket_name,
+                            Key=s3_key,
+                            UploadId=upload_id
+                        )
+                    await loop.run_in_executor(None, _abort_upload)
                     custom_logger.info(f"Aborted upload: {upload_id}")
                 except:
                     pass

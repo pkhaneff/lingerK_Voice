@@ -153,7 +153,7 @@ class AudioSegmentProcessor:
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
                 temp_original_path = f.name
             
-            audio_object = get_object(audio_s3_key, s3_bucket)
+            audio_object = await get_object(audio_s3_key, s3_bucket)
             with open(temp_original_path, 'wb') as f:
                 f.write(audio_object.body.read())
             

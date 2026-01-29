@@ -2,7 +2,8 @@
 import os
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from loguru import logger as custom_logger
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -12,6 +13,8 @@ from starlette.responses import Response
 from starlette.types import Message
 
 from app.core.config import ALLOWED_HOSTS, API_PREFIX, DEBUG, PROJECT_NAME, VERSION, MAX_REQUEST_SIZE
+# Import models to ensure they are registered with SQLAlchemy
+from app.api import model
 
 try:
     import cupy as cp
@@ -53,14 +56,26 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
         return response
     
+from app.api.exception_handlers import (
+    http_exception_handler,
+    validation_exception_handler,
+    global_exception_handler
+)
+
 def get_application() -> FastAPI:
     """Get application
-
+    
     Returns:
         FastAPI Chatbot application
     """
 
     application = FastAPI(title=PROJECT_NAME, version=VERSION)
+    
+    # Exception Handlers
+    application.add_exception_handler(HTTPException, http_exception_handler)
+    application.add_exception_handler(RequestValidationError, validation_exception_handler)
+    application.add_exception_handler(Exception, global_exception_handler)
+    
     application.add_middleware(LargeFileMiddleware)
     application.add_middleware(LoggingMiddleware)
     application.add_middleware(

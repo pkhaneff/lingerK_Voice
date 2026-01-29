@@ -46,7 +46,7 @@ class NoiseReducer:
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
                 temp_audio_path = f.name
             
-            audio_object = get_object(audio_s3_key, self.bucket_name)
+            audio_object = await get_object(audio_s3_key, self.bucket_name)
             with open(temp_audio_path, 'wb') as f:
                 f.write(audio_object.body.read())
             
@@ -230,7 +230,7 @@ class NoiseReducer:
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
                 temp_cleaned_path = f.name
             
-            audio_object = get_object(audio_s3_key, self.bucket_name)
+            audio_object = await get_object(audio_s3_key, self.bucket_name)
             with open(temp_original_path, 'wb') as f:
                 f.write(audio_object.body.read())
             

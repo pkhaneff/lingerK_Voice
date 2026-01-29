@@ -1,5 +1,7 @@
 from typing import Dict
 from urllib.parse import quote
+import asyncio
+import functools
 
 from botocore.client import Config
 
@@ -8,27 +10,52 @@ from app.api.infra.aws.s3 import s3_bucket
 from app.api.infra.aws.s3.entity.object import S3ListObject, S3Object
 
 
-def get_object(key: str, bucket_name: str) -> S3Object:
+async def get_object(key: str, bucket_name: str) -> S3Object:
+    loop = asyncio.get_event_loop()
     client = session.client("s3")
-    object_ = client.get_object(Bucket=bucket_name, Key=key)
+    
+    def _get():
+        return client.get_object(Bucket=bucket_name, Key=key)
+        
+    object_ = await loop.run_in_executor(None, _get)
     return S3Object(**object_)
 
 
-def list_object(prefix: str, bucket_name: str) -> S3ListObject:
+async def list_object(prefix: str, bucket_name: str) -> S3ListObject:
+    loop = asyncio.get_event_loop()
     client = session.client("s3")
-    list_ = client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    
+    def _list():
+        return client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+        
+    list_ = await loop.run_in_executor(None, _list)
     return S3ListObject(**list_)
 
 
-def put_object(obj: S3Object, bucket_name: str) -> Dict:
+async def put_object(obj: S3Object, bucket_name: str) -> Dict:
+    loop = asyncio.get_event_loop()
     client = session.client("s3")
-    object_ = client.put_object(Bucket=bucket_name, Body=obj.body, ContentType=obj.content_type, Key=obj.key)
+    
+    def _put():
+        return client.put_object(
+            Bucket=bucket_name, 
+            Body=obj.body, 
+            ContentType=obj.content_type, 
+            Key=obj.key
+        )
+        
+    object_ = await loop.run_in_executor(None, _put)
     return object_
 
 
-def delete_object(key: str, bucket_name: str) -> Dict:
+async def delete_object(key: str, bucket_name: str) -> Dict:
+    loop = asyncio.get_event_loop()
     client = session.client("s3")
-    object_ = client.delete_object(Bucket=bucket_name, Key=key)
+    
+    def _delete():
+        return client.delete_object(Bucket=bucket_name, Key=key)
+        
+    object_ = await loop.run_in_executor(None, _delete)
     return object_
 
 
@@ -91,7 +118,7 @@ def generate_presigned_put_url(key: str, time:int):
         HttpMethod="PUT")
 
 
-def copy_object(
+async def copy_object(
     source_key: str,
     destination_key: str,
     bucket_name: str,
@@ -100,18 +127,20 @@ def copy_object(
     metadata: Dict = None
 ) -> Dict:
     """Copy an S3 object to a new key within the same bucket
-
-        Args:
-            source_key (str): Source object key
-            destination_key (str): Destination object key
-            bucket_name (str): S3 bucket name
-            content_disposition (str)
-            content_type (str)
-            metadata (Dict)
-        Returns:
-            Dict: Response from S3 copy_object operation
-        """
+    
+    Args:
+        source_key (str): Source object key
+        destination_key (str): Destination object key
+        bucket_name (str): S3 bucket name
+        content_disposition (str)
+        content_type (str)
+        metadata (Dict)
+    Returns:
+        Dict: Response from S3 copy_object operation
+    """
+    loop = asyncio.get_event_loop()
     client = session.client("s3")
+    
     copy_source = {
         'Bucket': bucket_name,
         'Key': source_key
@@ -133,9 +162,18 @@ def copy_object(
     if content_disposition is not None:
         extra_args['ContentDisposition'] = content_disposition
 
-    return client.copy_object(**extra_args)
+    def _copy():
+        return client.copy_object(**extra_args)
+        
+    return await loop.run_in_executor(None, _copy)
 
 
-def head_object(key: str, bucket_name: str) -> Dict:
+async def head_object(key: str, bucket_name: str) -> Dict:
+    loop = asyncio.get_event_loop()
     client = session.client("s3")
-    return client.head_object(Bucket=bucket_name, Key=key)
+    
+    def _head():
+        return client.head_object(Bucket=bucket_name, Key=key)
+        
+    return await loop.run_in_executor(None, _head)
+
