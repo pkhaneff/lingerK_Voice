@@ -100,9 +100,9 @@ if __name__ == "__main__":
         app, 
         host=HOST, 
         port=int(PORT),
-        limit_max_requests=1000,
-        limit_concurrency=100,
-        timeout_keep_alive=300,
-        timoeout_graceful_shutdown=300,
+        limit_max_requests=10000,      # 🔧 Increased: Restart after 10k requests
+        limit_concurrency=40,          # 🔧 REDUCED from 100 to 40 for stability
+        timeout_keep_alive=120,        # 🔧 REDUCED from 300 to 120
+        timeout_graceful_shutdown=30,  # 🔧 FIXED typo and reduced
         h11_max_incomplete_event_size=100*1024*1024,
     )

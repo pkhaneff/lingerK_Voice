@@ -1,40 +1,40 @@
+"""Async S3 uploader with streaming - Memory efficient"""
 import io
+import aioboto3
 from typing import Dict, Any
 from fastapi import UploadFile
 from loguru import logger as custom_logger
 
 from app.api.infra.aws.s3 import s3_bucket
-from app.api.infra.aws.s3.repository.object import put_object
-from app.api.infra.aws.s3.entity.object import S3Object
-from app.api.infra.aws import session
+from app.core.config import AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION
 
 
 class S3Uploader:
-    """Upload files to S3. Supports both audio and video."""
+    """Async S3 uploader with streaming for memory efficiency"""
     
     def __init__(self, s3_prefix: str):
         self.bucket_name = s3_bucket
         self.s3_prefix = s3_prefix
-        self.s3_client = session.client("s3")
+        self.session = aioboto3.Session(
+            aws_access_key_id=AWS_ACCESS_KEY,
+            aws_secret_access_key=AWS_SECRET_KEY,
+            region_name=AWS_REGION
+        )
     
     async def upload_file(self, file: UploadFile, s3_key: str) -> Dict[str, Any]:
         """
-        Upload file to S3. Auto-select upload method based on size.
+        Upload file to S3 with streaming (memory efficient).
         
-        Args:
-            file: UploadFile object
-            s3_key: S3 key without prefix
-            
-        Returns:
-            {'success': bool, 'data': {'s3_key', 's3_url', 'bucket_name'}, 'error': str}
+        Memory usage: ~10MB buffer instead of full file size
         """
         try:
             full_s3_key = f"{self.s3_prefix}/{s3_key}"
             file_size = file.size
             
-            custom_logger.info(f"Uploading to S3: {full_s3_key}, size: {file_size:,} bytes")
+            custom_logger.info(f"📤 Uploading to S3: {full_s3_key}, size: {file_size:,} bytes")
             
-            if file_size > 100 * 1024 * 1024:  
+            # Use multipart for files > 100MB
+            if file_size > 100 * 1024 * 1024:
                 result = await self._multipart_upload(file, full_s3_key, file_size)
             else:
                 result = await self._direct_upload(file, full_s3_key, file_size)
@@ -42,73 +42,31 @@ class S3Uploader:
             return result
             
         except Exception as e:
-            custom_logger.error(f"Upload failed: {str(e)}", exc_info=True)
+            custom_logger.error(f"❌ Upload failed: {str(e)}", exc_info=True)
             return {'success': False, 'data': None, 'error': str(e)}
     
-    async def upload_bytes(self, content: bytes, s3_key: str, content_type: str) -> Dict[str, Any]:
-        """
-        Upload raw bytes to S3.
-        
-        Args:
-            content: File content as bytes
-            s3_key: S3 key without prefix
-            content_type: MIME type
-            
-        Returns:
-            {'success': bool, 'data': {'s3_key', 's3_url', 'bucket_name'}, 'error': str}
-        """
-        try:
-            full_s3_key = f"{self.s3_prefix}/{s3_key}"
-            
-            s3_object = S3Object(
-                body=io.BytesIO(content),
-                content_length=len(content),
-                content_type=content_type,
-                key=full_s3_key,
-                last_modified=None
-            )
-            
-            # Reformatted to use await
-            await put_object(s3_object, self.bucket_name)
-            
-            s3_url = f"s3://{self.bucket_name}/{full_s3_key}"
-            custom_logger.info(f"Bytes uploaded: {s3_url}")
-            
-            return {
-                'success': True,
-                'data': {
-                    's3_key': full_s3_key,
-                    's3_url': s3_url,
-                    'bucket_name': self.bucket_name
-                },
-                'error': None
-            }
-            
-        except Exception as e:
-            custom_logger.error(f"Bytes upload failed: {str(e)}", exc_info=True)
-            return {'success': False, 'data': None, 'error': str(e)}
-    
-    async def _direct_upload(self, file: UploadFile, s3_key: str, file_size: int) -> Dict[str, Any]:
-        """Direct upload for files < 100MB"""
+    async def _direct_upload(
+        self,
+        file: UploadFile,
+        s3_key: str,
+        file_size: int
+    ) -> Dict[str, Any]:
+        """Direct streaming upload for files < 100MB"""
         try:
             await file.seek(0)
-            file_content = await file.read()
-            
             content_type = self._detect_content_type(file.filename)
             
-            s3_object = S3Object(
-                body=io.BytesIO(file_content),
-                content_length=file_size,
-                content_type=content_type,
-                key=s3_key,
-                last_modified=None
-            )
-            
-            # Reformatted to use await
-            await put_object(s3_object, self.bucket_name)
+            async with self.session.client('s3') as s3:
+                # ✅ Stream upload directly - NO memory loading
+                await s3.upload_fileobj(
+                    file.file,
+                    self.bucket_name,
+                    s3_key,
+                    ExtraArgs={'ContentType': content_type}
+                )
             
             s3_url = f"s3://{self.bucket_name}/{s3_key}"
-            custom_logger.info(f"Direct upload completed: {s3_url}")
+            custom_logger.info(f"✅ Upload completed: {s3_url}")
             
             return {
                 'success': True,
@@ -124,115 +82,145 @@ class S3Uploader:
             custom_logger.error(f"Direct upload failed: {str(e)}")
             raise
     
-    async def _multipart_upload(self, file: UploadFile, s3_key: str, file_size: int) -> Dict[str, Any]:
-        """Multipart upload for files >= 100MB"""
+    async def _multipart_upload(
+        self,
+        file: UploadFile,
+        s3_key: str,
+        file_size: int
+    ) -> Dict[str, Any]:
+        """Async multipart upload for files >= 100MB"""
         upload_id = None
-        import asyncio
-        loop = asyncio.get_event_loop()
         
         try:
             chunk_size = self._calculate_chunk_size(file_size)
             content_type = self._detect_content_type(file.filename)
             
-            # Async create multipart upload
-            def _create_multipart():
-                return self.s3_client.create_multipart_upload(
+            async with self.session.client('s3') as s3:
+                # Create multipart upload
+                response = await s3.create_multipart_upload(
                     Bucket=self.bucket_name,
                     Key=s3_key,
                     ContentType=content_type
                 )
-            
-            response = await loop.run_in_executor(None, _create_multipart)
-            upload_id = response['UploadId']
-            custom_logger.info(f"Multipart upload initiated: {upload_id}")
-            
-            await file.seek(0)
-            parts = []
-            part_number = 1
-            bytes_uploaded = 0
-            
-            while bytes_uploaded < file_size:
-                current_chunk_size = min(chunk_size, file_size - bytes_uploaded)
-                chunk_data = await file.read(current_chunk_size)
+                upload_id = response['UploadId']
+                custom_logger.info(f"🔄 Multipart upload started: {upload_id}")
                 
-                if not chunk_data:
-                    break
+                await file.seek(0)
+                parts = []
+                part_number = 1
+                bytes_uploaded = 0
                 
-                # Async upload part
-                def _upload_part(p_num, data):
-                    return self.s3_client.upload_part(
+                # Upload parts in chunks
+                while bytes_uploaded < file_size:
+                    current_chunk_size = min(chunk_size, file_size - bytes_uploaded)
+                    chunk_data = await file.read(current_chunk_size)
+                    
+                    if not chunk_data:
+                        break
+                    
+                    # Upload part (async, non-blocking)
+                    part_response = await s3.upload_part(
                         Bucket=self.bucket_name,
                         Key=s3_key,
-                        PartNumber=p_num,
+                        PartNumber=part_number,
                         UploadId=upload_id,
-                        Body=io.BytesIO(data)
+                        Body=chunk_data
                     )
+                    
+                    parts.append({
+                        'PartNumber': part_number,
+                        'ETag': part_response['ETag']
+                    })
+                    
+                    bytes_uploaded += len(chunk_data)
+                    part_number += 1
+                    
+                    progress = (bytes_uploaded / file_size) * 100
+                    custom_logger.info(f"📊 Progress: {progress:.1f}%")
                 
-                part_response = await loop.run_in_executor(None, _upload_part, part_number, chunk_data)
-                
-                parts.append({
-                    'PartNumber': part_number,
-                    'ETag': part_response['ETag']
-                })
-                
-                bytes_uploaded += len(chunk_data)
-                part_number += 1
-                
-                progress = (bytes_uploaded / file_size) * 100
-                custom_logger.info(f"Upload progress: {progress:.1f}%")
-            
-            # Async complete upload
-            def _complete_upload():
-                self.s3_client.complete_multipart_upload(
+                # Complete multipart upload
+                await s3.complete_multipart_upload(
                     Bucket=self.bucket_name,
                     Key=s3_key,
                     UploadId=upload_id,
                     MultipartUpload={'Parts': parts}
                 )
-            
-            await loop.run_in_executor(None, _complete_upload)
-            
-            s3_url = f"s3://{self.bucket_name}/{s3_key}"
-            custom_logger.info(f"Multipart upload completed: {s3_url}")
-            
-            return {
-                'success': True,
-                'data': {
-                    's3_key': s3_key,
-                    's3_url': s3_url,
-                    'bucket_name': self.bucket_name,
-                    'parts_count': len(parts)
-                },
-                'error': None
-            }
-            
+                
+                s3_url = f"s3://{self.bucket_name}/{s3_key}"
+                custom_logger.info(f"✅ Multipart upload completed: {s3_url}")
+                
+                return {
+                    'success': True,
+                    'data': {
+                        's3_key': s3_key,
+                        's3_url': s3_url,
+                        'bucket_name': self.bucket_name,
+                        'parts_count': len(parts)
+                    },
+                    'error': None
+                }
+        
         except Exception as e:
-            custom_logger.error(f"Multipart upload failed: {str(e)}")
+            custom_logger.error(f"❌ Multipart upload failed: {str(e)}")
             
+            # Cleanup on failure
             if upload_id:
                 try:
-                    # Async abort
-                    def _abort_upload():
-                        self.s3_client.abort_multipart_upload(
+                    async with self.session.client('s3') as s3:
+                        await s3.abort_multipart_upload(
                             Bucket=self.bucket_name,
                             Key=s3_key,
                             UploadId=upload_id
                         )
-                    await loop.run_in_executor(None, _abort_upload)
-                    custom_logger.info(f"Aborted upload: {upload_id}")
+                    custom_logger.info(f"🗑️ Aborted upload: {upload_id}")
                 except:
                     pass
             
             raise
     
+    async def upload_bytes(
+        self,
+        content: bytes,
+        s3_key: str,
+        content_type: str
+    ) -> Dict[str, Any]:
+        """Upload raw bytes to S3"""
+        try:
+            full_s3_key = f"{self.s3_prefix}/{s3_key}"
+            
+            async with self.session.client('s3') as s3:
+                await s3.put_object(
+                    Bucket=self.bucket_name,
+                    Key=full_s3_key,
+                    Body=content,
+                    ContentType=content_type
+                )
+            
+            s3_url = f"s3://{self.bucket_name}/{full_s3_key}"
+            custom_logger.info(f"✅ Bytes uploaded: {s3_url}")
+            
+            return {
+                'success': True,
+                'data': {
+                    's3_key': full_s3_key,
+                    's3_url': s3_url,
+                    'bucket_name': self.bucket_name
+                },
+                'error': None
+            }
+            
+        except Exception as e:
+            custom_logger.error(f"Bytes upload failed: {str(e)}", exc_info=True)
+            return {'success': False, 'data': None, 'error': str(e)}
+    
     def _calculate_chunk_size(self, file_size: int) -> int:
         """Calculate optimal chunk size"""
-        if file_size < 200 * 1024 * 1024: 
-            return 10 * 1024 * 1024 
-        elif file_size < 500 * 1024 * 1024: 
-            return 25 * 1024 * 1024  
-        else:  
-            return 50 * 1024 * 1024  
+        if file_size < 200 * 1024 * 1024:  # < 200MB
+            return 10 * 1024 * 1024  # 10MB
+        elif file_size < 500 * 1024 * 1024:  # < 500MB
+            return 25 * 1024 * 1024  # 25MB
+        else:  # >= 500MB
+            return 50 * 1024 * 1024  # 50MB
     
     def _detect_content_type(self, filename: str) -> str:
         """Detect content type from filename"""
