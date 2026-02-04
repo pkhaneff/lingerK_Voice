@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Optional
 import uuid
 from datetime import datetime
 from sqlalchemy import select, update
@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.model.speaker_track_model import SpeakerTrack
 from app.api.model.track_segment_model import TrackSegment
+from app.api.repositories.interfaces import ITrackRepository
 
-class TrackRepository:
+class TrackRepository(ITrackRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
 

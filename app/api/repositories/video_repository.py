@@ -1,8 +1,9 @@
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.model.video_model import VideoIngest
+from app.api.repositories.interfaces import IVideoRepository
 
-class VideoRepository:
+class VideoRepository(IVideoRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
 

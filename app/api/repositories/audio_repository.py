@@ -1,13 +1,14 @@
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 import uuid
 from datetime import datetime
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.model.audio_model import AudioIngest
 from app.api.model.audio_clean import AudioClean
+from app.api.repositories.interfaces import IAudioRepository
 
-class AudioRepository:
+class AudioRepository(IAudioRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
 

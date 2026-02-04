@@ -14,7 +14,11 @@ from app.api.services.workflow.transcription_workflow import TranscriptionWorkfl
 from app.core.config import S3_PREFIX_AUDIO, S3_PREFIX_VIDEO
 from app.api.repositories.audio_repository import AudioRepository
 from app.api.repositories.track_repository import TrackRepository
+from app.api.repositories.video_repository import VideoRepository
 from app.api.db.session import AsyncSessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.services.metadata.audio_saver import AudioSaver
+from app.api.services.metadata.track_saver import TrackSaver
 
 # --- Low Level Services ---
 
@@ -50,20 +54,27 @@ def get_transcription_service():
 
 # --- Repositories ---
 
-def get_db_session():
-    return AsyncSessionLocal()
+async def get_db_session():
+    async with AsyncSessionLocal() as session:
+        yield session
 
-async def get_audio_repository(session = Depends(get_db_session)):
-    try:
-        yield AudioRepository(session)
-    finally:
-        await session.close()
+def get_db_saver():
+    return DBSaver(AsyncSessionLocal)
 
-async def get_track_repository(session = Depends(get_db_session)):
-    try:
-        yield TrackRepository(session)
-    finally:
-        await session.close()
+def get_audio_saver():
+    return AudioSaver(AsyncSessionLocal)
+
+def get_track_saver():
+    return TrackSaver(AsyncSessionLocal)
+
+def get_audio_repository(session: AsyncSession = Depends(get_db_session)):
+    return AudioRepository(session)
+
+def get_track_repository(session: AsyncSession = Depends(get_db_session)):
+    return TrackRepository(session)
+    
+def get_video_repository(session: AsyncSession = Depends(get_db_session)):
+    return VideoRepository(session)
         
 
 # --- Workflow Services ---
