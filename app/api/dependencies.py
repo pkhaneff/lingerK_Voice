@@ -119,3 +119,27 @@ def get_transcription_workflow(
         transcription_service=transcription_service,
         db_saver=db_saver
     )
+
+# --- Semantic Services ---
+
+def get_semantic_repository(session: AsyncSession = Depends(get_db_session)):
+    from app.api.repositories.semantic_repository import SemanticRepository
+    return SemanticRepository(session)
+
+def get_semantic_orchestrator(session: AsyncSession = Depends(get_db_session)):
+    from app.api.services.semantic.orchestrator import SemanticOrchestrator
+    from app.api.services.semantic.text_preparation import TextPreparationService
+    from app.api.services.semantic.sentence_tokenizer import SentenceTokenizer
+    from app.api.services.semantic.text_normalizer import TextNormalizer
+    from app.api.services.semantic.document_type_detector import DocumentTypeDetector
+    from app.api.repositories.semantic_repository import SemanticRepository
+    
+    tokenizer = SentenceTokenizer()
+    normalizer = TextNormalizer()
+    detector = DocumentTypeDetector()
+    repository = SemanticRepository(session)
+    
+    text_prep = TextPreparationService(session, tokenizer, normalizer, detector)
+    
+    return SemanticOrchestrator(text_prep, repository)
+

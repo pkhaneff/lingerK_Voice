@@ -421,7 +421,7 @@ class OSDAnalyzer:
                     'model_name': 'pyannote/overlapped-speech-detection',
                     'hf_token': HF_TOKEN,
                     'device': DEVICE,
-                    'cache_dir': Path("app/data_model/storage/osd")
+                    'cache_dir': MODEL_CONFIGS['osd'].cache_dir
                 }
                 
                 self.osd_model = OSDModel(config=config)

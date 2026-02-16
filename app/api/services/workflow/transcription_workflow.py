@@ -82,25 +82,38 @@ class TranscriptionWorkflowService:
             if not update_result['success']:
                 custom_logger.warning(f"Failed to update transcripts: {update_result['error']}")
 
+            
+            semantic_doc_id = None
+            try:
+                from app.api.services.semantic.orchestrator import SemanticOrchestrator
+                from app.api.services.semantic.text_preparation import TextPreparationService
+                from app.api.services.semantic.sentence_tokenizer import SentenceTokenizer
+                from app.api.services.semantic.text_normalizer import TextNormalizer
+                from app.api.services.semantic.document_type_detector import DocumentTypeDetector
+                from app.api.repositories.semantic_repository import SemanticRepository
+                from app.api.db.session import AsyncSessionLocal
+                
+                async with AsyncSessionLocal() as session:
+                    tokenizer = SentenceTokenizer()
+                    normalizer = TextNormalizer()
+                    detector = DocumentTypeDetector()
+                    repository = SemanticRepository(session)
+                    text_prep = TextPreparationService(session, tokenizer, normalizer, detector)
+                    orchestrator = SemanticOrchestrator(text_prep, repository)
+                    
+                    result = await orchestrator.process(uuid.UUID(audio_id_clean))
+                    if result['success']:
+                        semantic_doc_id = str(result['doc_id'])
+            except Exception as e:
+                custom_logger.error(f"Semantic processing failed: {e}", exc_info=True)
+
             return {
                 'success': True,
                 'data': {
                     'audio_id_clean': audio_id_clean,
                     'original_audio_id': audio_id,
                     'status': 'transcribed',
-                    'summary': {
-                        'total_tracks': len(transcribed_tracks),
-                        'total_words': sum(len(t.get('words', [])) for t in transcribed_tracks),
-                    },
-                    'tracks': [
-                        {
-                            'speaker_id': t.get('speaker_id', 0),
-                            'transcript': t.get('transcript', ''),
-                            'words_count': len(t.get('words', [])),
-                            # Limit data size for response if needed
-                        }
-                        for t in transcribed_tracks
-                    ]
+                    'semantic_doc_id': semantic_doc_id
                 }
             }
 

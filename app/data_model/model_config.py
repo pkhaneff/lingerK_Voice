@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from typing import Optional
 from app.core.config import DEVICE
 
-MODEL_STORAGE_BASE = Path("app/data_model/storage")
+# Use absolute path to ensure cache is found regardless of working directory
+MODEL_STORAGE_BASE = Path(__file__).parent / "storage"
 MODEL_STORAGE_BASE.mkdir(parents=True, exist_ok=True)
 
 @dataclass

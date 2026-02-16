@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 import app.api.model.audio_model 
 import app.api.model.video_model
+import app.api.model.semantic_document
 from app.api.db.base import Base
 
 config = context.config

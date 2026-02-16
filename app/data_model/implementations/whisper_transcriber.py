@@ -67,7 +67,9 @@ class WhisperTranscriber:
         """Sync load - optimized version with GPU support and pipeline for chunking."""
 
         model_id = "vinai/PhoWhisper-medium"
-        cache_dir = "app/data_model/storage/phowhisper"
+        # Use absolute path to ensure cache is found regardless of working directory
+        cache_dir = Path(__file__).parent.parent / "storage" / "phowhisper"
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
         custom_logger.info(f"Loading from: {model_id}")
         custom_logger.info(f"Cache dir: {cache_dir}")
@@ -92,7 +94,7 @@ class WhisperTranscriber:
             model=model_id,
             torch_dtype=torch_dtype,
             device=device,
-            model_kwargs={"cache_dir": cache_dir},
+            model_kwargs={"cache_dir": str(cache_dir)},
             chunk_length_s=30,  # Process in 30-second chunks
             stride_length_s=5,   # 5-second overlap between chunks for smooth transitions
         )
@@ -108,7 +110,7 @@ class WhisperTranscriber:
         # Also load processor for compatibility (if needed elsewhere)
         self.processor = AutoProcessor.from_pretrained(
             model_id,
-            cache_dir=cache_dir
+            cache_dir=str(cache_dir)
         )
         self.model = self.pipe.model  # Keep reference for cleanup
 
@@ -116,7 +118,7 @@ class WhisperTranscriber:
     
     def _cleanup_unused_files(self):
         """Remove unnecessary files to save disk space."""
-        cache_path = Path("app/data_model/storage/phowhisper")
+        cache_path = Path(__file__).parent.parent / "storage" / "phowhisper"
         
         if not cache_path.exists():
             return
